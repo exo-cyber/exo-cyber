@@ -9,7 +9,8 @@ const modules = [
   require('./sticker'),
   require('./music'),
   require('./profile'),
-  require('./fun')
+  require('./fun'),
+  require('./viewonce')
 ];
 
 const list = [];

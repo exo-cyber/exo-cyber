@@ -1,12 +1,13 @@
-// Nick protection: playful replies when the protected contact is
-// actually @mentioned in a group. Never triggers from plain text.
+// Nick protection: when the protected contact is actually @mentioned in a group,
+// Exo-Cyber reacts and answers with a rude, protective line. Replies don't count.
 const config = require('./config');
 const settings = require('./settings');
 const { numberOf } = require('./jid');
 
 const REPLIES = [
-  'Leave my gee alone please',
+  'stop tagging my owner he is busy with me 🙃',
 ];
+const REACTIONS = ['🙄', '😒', '🤨', '😐'];
 
 let last = -1;
 const lastFire = new Map(); // groupId -> time
@@ -17,19 +18,19 @@ function pick() {
   last = i;
   return REPLIES[i];
 }
+const emoji = () => REACTIONS[Math.floor(Math.random() * REACTIONS.length)];
 
-const ready = () => config.protectedContact.ids.length > 0 && settings.isProtectOn();
-
-// Returns a reply string, or null if nothing should be said.
+// Returns { reply, emoji } or null if nothing should be said.
 function check({ isGroup, jid, senderNum, mentioned }) {
-  if (!isGroup || !ready()) return null;
-  const ids = config.protectedContact.ids;
-  if (!(mentioned || []).some((j) => ids.includes(numberOf(j)))) return null;
-  if (ids.includes(senderNum)) return null; // Mr Nick tagging himself
+  const ids = settings.protectedIds();
+  if (!isGroup || !ids.length || !settings.isProtectOn()) return null;
+  const targets = (mentioned || []).map(numberOf);
+  if (!targets.some((n) => ids.includes(n))) return null;
+  if (ids.includes(senderNum)) return null; // Nick tagging himself
   const now = Date.now();
   if (now - (lastFire.get(jid) || 0) < config.protectedContact.cooldownMs) return null;
   lastFire.set(jid, now);
-  return pick();
+  return { reply: pick(), emoji: emoji() };
 }
 
 module.exports = { check, REPLIES };

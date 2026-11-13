@@ -1,8 +1,9 @@
 // Decides what to do with each incoming message:
-// 1) commands  2) Nick protection  3) AI chat (if Exo-Cyber is addressed)
+// learn ids -> AFK -> commands -> Nick protection -> AI chat (if Exo-Cyber is addressed)
 const config = require('./config');
 const log = require('./logger');
 const { numberOf } = require('./jid');
+const { fmtDuration } = require('./time');
 const { isDuplicate } = require('./dedupe');
 const { unwrap, getText, getContext } = require('./helpers');
 const commands = require('./index');
@@ -10,24 +11,82 @@ const nick = require('./nick');
 const settings = require('./settings');
 const memory = require('./memory');
 const fallback = require('./fallback');
-const { systemPrompt, offlineReply } = require('./personality');
+const { systemPrompt, offlineReply, nameCallReply } = require('./personality');
 
 const lastAiAt = new Map();
+const afkNoticeAt = new Map();
 
-function botNumbers(sock) {
-  return [sock.user?.id, sock.user?.lid].filter(Boolean).map(numberOf);
+// Ids of messages Exo-Cyber himself sent. A reply to one of these is a reply to Exo-Cyber,
+// whatever id (phone number or hidden LID) WhatsApp shows for him.
+const sentIds = new Map();
+const extraBotIds = new Set(); // his other ids, learned from those replies
+const wrapped = new WeakSet();
+function trackSent(sock) {
+  if (wrapped.has(sock)) return;
+  wrapped.add(sock);
+  const original = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (...args) => {
+    const res = await original(...args);
+    const id = res && res.key && res.key.id;
+    if (id) {
+      sentIds.set(id, Date.now());
+      if (sentIds.size > 1000) for (const k of sentIds.keys()) { sentIds.delete(k); if (sentIds.size <= 800) break; }
+    }
+    return res;
+  };
+}
+
+const botNumbers = (sock) => [sock.user?.id, sock.user?.lid].filter(Boolean).map(numberOf).concat([...extraBotIds]);
+
+// WhatsApp can show the same person as a phone number AND as a hidden id (LID).
+// When we see both for a known owner/protected person, remember both.
+function learnAliases(msg) {
+  const k = msg.key;
+  const ids = [k.participant, k.participantAlt, k.participantPn, k.remoteJidAlt, k.remoteJid]
+    .filter((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@lid')))
+    .map(numberOf);
+  const uniq = [...new Set(ids)];
+  if (uniq.length < 2) return;
+  if (uniq.some((n) => settings.isOwner(n))) settings.addClaimed(uniq);
+  else if (uniq.some((n) => settings.protectedIds().includes(n))) settings.addProtectAlias(uniq);
 }
 
 // In groups Exo-Cyber only answers when addressed: his name, an @mention, or a reply to him.
 function isAddressed(ctx, bots) {
   if (!ctx.isGroup) return true;
   if (/\bexo[- ]?cyber\b/i.test(ctx.text)) return true;
+  const quotedId = ctx.ctxInfo?.stanzaId;
+  if (quotedId && sentIds.has(quotedId)) {           // a reply to something Exo-Cyber said
+    if (ctx.ctxInfo.participant) extraBotIds.add(numberOf(ctx.ctxInfo.participant));
+    return true;
+  }
   if (ctx.mentioned.some((j) => bots.includes(numberOf(j)))) return true;
   if (ctx.ctxInfo?.participant && bots.includes(numberOf(ctx.ctxInfo.participant))) return true;
   return false;
 }
 
+async function afkHandling(ctx, isAfkCommand) {
+  // 1) The AFK person is back
+  const mine = settings.getAfk(ctx.senderNum);
+  if (mine && !isAfkCommand) {
+    settings.clearAfk(ctx.senderNum);
+    await ctx.reply(`Back already? You were gone ${fmtDuration(Date.now() - mine.since)}.`);
+  }
+  // 2) Someone tagged / replied to an AFK person (groups only, max once per 5 min per person)
+  if (!ctx.isGroup) return;
+  const targets = [...new Set([...ctx.mentioned, ctx.ctxInfo?.participant].filter(Boolean).map(numberOf))];
+  for (const n of targets) {
+    const afk = settings.getAfk(n);
+    if (!afk || n === ctx.senderNum) continue;
+    const key = `${ctx.jid}:${n}`;
+    if (Date.now() - (afkNoticeAt.get(key) || 0) < 5 * 60 * 1000) continue;
+    afkNoticeAt.set(key, Date.now());
+    await ctx.reply(`${afk.name || 'They'} is AFK: ${afk.reason} (${fmtDuration(Date.now() - afk.since)} ago).`);
+  }
+}
+
 async function handleMessage(sock, msg) {
+  trackSent(sock);
   const receivedAt = Date.now();
   if (!msg.message || msg.key.fromMe) return;
   const jid = msg.key.remoteJid;
@@ -38,31 +97,48 @@ async function handleMessage(sock, msg) {
   if (ts && Date.now() / 1000 - ts > 120) return; // ignore old backlog after reconnect
 
   const m = unwrap(msg.message);
-  if (!m || m.protocolMessage || m.reactionMessage || m.senderKeyDistributionMessage && Object.keys(m).length === 1) return;
+  if (!m || m.protocolMessage || m.reactionMessage || (m.senderKeyDistributionMessage && Object.keys(m).length === 1)) return;
+
+  learnAliases(msg);
 
   const text = getText(m).trim();
   const isGroup = jid.endsWith('@g.us');
   const sender = msg.key.participant || jid;
   const senderNum = numberOf(sender);
   const ctxInfo = getContext(m);
+  const prefix = settings.prefix();
 
   const ctx = {
     sock, msg, m, jid, sender, senderNum, text, isGroup, ctxInfo, receivedAt,
     pushName: msg.pushName || '',
     mentioned: ctxInfo?.mentionedJid || [],
-    isOwner: config.owner.ids.includes(senderNum),
+    isOwner: settings.isOwner(senderNum),
     reply: (t, extra = {}) => sock.sendMessage(jid, { text: t, ...extra }, { quoted: msg }),
   };
 
-  // 1) Commands
-  if (text.startsWith(config.prefix) && (await commands.run(ctx))) return;
+  const isCmd = text.startsWith(prefix);
+  const isAfkCommand = isCmd && /^afk(\s|$)/i.test(text.slice(prefix.length).trim());
 
-  // 2) Nick protection
+  // 0) AFK bookkeeping (never blocks the rest)
+  await afkHandling(ctx, isAfkCommand).catch((e) => log.warn('AFK handling failed:', e.message));
+
+  // 1) Commands
+  if (isCmd && (await commands.run(ctx))) return;
+
+  // 2) Nick protection: react + reply
   const protect = nick.check(ctx);
-  if (protect) { await ctx.reply(protect); return; }
+  if (protect) {
+    await sock.sendMessage(jid, { react: { text: protect.emoji, key: msg.key } }).catch(() => {});
+    await ctx.reply(protect.reply);
+    return;
+  }
 
   // 3) AI conversation
   if (!text || !settings.isAiOn(jid) || !isAddressed(ctx, botNumbers(sock))) return;
+
+  // Just his name ("Exo-Cyber") -> a quick answer with no AI call.
+  if (/^@?\s*exo[- ]?cyber[\s!?.,]*$/i.test(text)) { await ctx.reply(nameCallReply()); return; }
+
   const last = lastAiAt.get(senderNum) || 0;
   if (Date.now() - last < config.ai.userCooldownMs) return;
   lastAiAt.set(senderNum, Date.now());
@@ -87,3 +163,4 @@ async function handleMessage(sock, msg) {
 }
 
 module.exports = { handleMessage };
+
