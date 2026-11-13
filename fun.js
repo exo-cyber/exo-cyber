@@ -264,22 +264,4 @@ module.exports = [
         box('EXO RPS', [`You: ${choices[user]} ${user}`, `Me: ${choices[bot]} ${bot}`, result])
       );
     }
-  },
-  {
-    name: 'joke',
-    category: 'FUN',
-    menu: ['joke'],
-    run: async (ctx) => {
-      const jokes = [
-        "Why did the computer go to the doctor? Because it had a virus! 😂",
-        "Why was the math book sad? Because it had too many problems! 🤣",
-        "Why don't skeletons fight? They don't have the guts! 💀",
-        "Why did the phone wear glasses? It lost its contacts! 😂",
-        "What do you call a sleeping bull? A bulldozer! 🤣"
-      ];
-
-      const joke = pick(jokes);
-      await ctx.reply(box('EXO JOKES', [joke]));
-    }
-  }
-];
+  }];
