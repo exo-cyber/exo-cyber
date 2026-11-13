@@ -1,0 +1,14 @@
+// Small switches that survive restarts: AI on/off per chat, protection on/off (set via PROTECTED_ENABLED).
+const config = require('./config');
+const { createStore } = require('./jsonStore');
+
+const store = createStore('settings', { aiOff: {}, protectEnabled: null });
+
+const isAiOn = (chatId) => !store.data.aiOff[chatId];
+function setAi(chatId, on) {
+  if (on) delete store.data.aiOff[chatId]; else store.data.aiOff[chatId] = true;
+  store.save();
+}
+const isProtectOn = () => (store.data.protectEnabled === null ? config.protectedContact.enabled : store.data.protectEnabled);
+
+module.exports = { isAiOn, setAi, isProtectOn, init: async () => { await store.load(); store.data.aiOff = store.data.aiOff || {}; if (store.data.protectEnabled === undefined) store.data.protectEnabled = null; } };
