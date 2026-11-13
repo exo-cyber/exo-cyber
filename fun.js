@@ -6,7 +6,6 @@ const box = (title, lines) =>
   [].concat(lines).map((l) => `┃ ${l}`).join('\n') +
   `\n┃\n╰━━━━━━━━━━━━`;
 
-// Works with: .cmd text  OR  replying to a message
 const getArgs = (ctx) => {
   if (Array.isArray(ctx.args)) return ctx.args.join(' ').trim();
   if (typeof ctx.text === 'string') return ctx.text.trim();
@@ -23,7 +22,6 @@ module.exports = [
       await ctx.reply(box('EXO COIN', [`You got: ${side}`]));
     }
   },
-
   {
     name: 'dice',
     category: 'FUN',
@@ -34,14 +32,16 @@ module.exports = [
       await ctx.reply(box('EXO DICE', [`🎲 Rolled: ${n} ${faces[n - 1]}`]));
     }
   },
-
   {
     name: '8ball',
     category: 'FUN',
     menu: ['8ball'],
     run: async (ctx) => {
       const q = getArgs(ctx);
-      if (!q) return ctx.reply(box('EXO 8BALL', ['Ask me something first 🎱', 'Example: .8ball will I be rich?']));
+      if (!q) return ctx.reply(box('EXO 8BALL', [
+        'Ask me something first 🎱',
+        'Example: .8ball will I be rich?'
+      ]));
       const answers = [
         'Yes, definitely ✅',
         'Without a doubt 💯',
@@ -55,7 +55,6 @@ module.exports = [
       await ctx.reply(box('EXO 8BALL', [`❓ ${q}`, `🎱 ${pick(answers)}`]));
     }
   },
-
   {
     name: 'roast',
     category: 'FUN',
@@ -72,7 +71,6 @@ module.exports = [
       await ctx.reply(box('EXO ROAST', [pick(roasts), '', '(just kidding... maybe 😏)']));
     }
   },
-
   {
     name: 'compliment',
     category: 'FUN',
@@ -88,7 +86,6 @@ module.exports = [
       await ctx.reply(box('EXO COMPLIMENT', [pick(nice)]));
     }
   },
-
   {
     name: 'ship',
     category: 'FUN',
@@ -97,7 +94,10 @@ module.exports = [
       const args = getArgs(ctx);
       const names = args.split(/\s*(?:\+|&|and|x)\s*|\s+/i).filter(Boolean);
       if (names.length < 2) {
-        return ctx.reply(box('EXO SHIP', ['Give me two names 💘', 'Example: .ship Alex + Sam']));
+        return ctx.reply(box('EXO SHIP', [
+          'Give me two names 💘',
+          'Example: .ship Alex + Sam'
+        ]));
       }
       const [a, b] = names;
       const pct = rand(1, 100);
@@ -107,20 +107,26 @@ module.exports = [
         pct > 85 ? 'Soulmates 💍' :
         pct > 60 ? 'Strong spark 🔥' :
         pct > 35 ? 'Could work 🤔' : 'Just friends 😅';
-      await ctx.reply(box('EXO SHIP', [`${a} 💞 ${b}`, bar, `Match: ${pct}%`, verdict]));
+      await ctx.reply(box('EXO SHIP', [
+        `${a} 💞 ${b}`,
+        bar,
+        `Match: ${pct}%`,
+        verdict
+      ]));
     }
   },
-
   {
     name: 'rate',
     category: 'FUN',
     menu: ['rate'],
     run: async (ctx) => {
       const thing = getArgs(ctx) || 'you';
-      await ctx.reply(box('EXO RATE', [`📊 ${thing}`, `Score: ${rand(0, 100)}/100`]));
+      await ctx.reply(box('EXO RATE', [
+        `📊 ${thing}`,
+        `Score: ${rand(0, 100)}/100`
+      ]));
     }
   },
-
   {
     name: 'iq',
     category: 'FUN',
@@ -130,11 +136,16 @@ module.exports = [
       const note =
         iq > 160 ? 'Certified genius 🧠⚡' :
         iq > 120 ? 'Big brain energy 😎' :
-        iq > 90 ? 'Perfectly average 👌' : 'Loading... please wait ⏳';
-      await ctx.reply(box('EXO IQ TEST', [`Your IQ: ${iq}`, note, '', '(100% scientifically fake)']));
+        iq > 90 ? 'Perfectly average 👌' :
+        'Loading... please wait ⏳';
+      await ctx.reply(box('EXO IQ TEST', [
+        `Your IQ: ${iq}`,
+        note,
+        '',
+        '(100% scientifically fake)'
+      ]));
     }
   },
-
   {
     name: 'fact',
     category: 'FUN',
@@ -150,7 +161,6 @@ module.exports = [
       await ctx.reply(box('EXO FACTS', [pick(facts)]));
     }
   },
-
   {
     name: 'truth',
     category: 'FUN',
@@ -166,7 +176,6 @@ module.exports = [
       await ctx.reply(box('EXO TRUTH', [pick(q)]));
     }
   },
-
   {
     name: 'dare',
     category: 'FUN',
@@ -182,14 +191,16 @@ module.exports = [
       await ctx.reply(box('EXO DARE', [pick(d)]));
     }
   },
-
   {
     name: 'emojify',
     category: 'FUN',
     menu: ['emojify'],
     run: async (ctx) => {
       const text = getArgs(ctx);
-      if (!text) return ctx.reply(box('EXO EMOJIFY', ['Give me some text 😎', 'Example: .emojify hello world']));
+      if (!text) return ctx.reply(box('EXO EMOJIFY', [
+        'Give me some text 😎',
+        'Example: .emojify hello world'
+      ]));
       const out = [...text.toLowerCase()]
         .map((c) =>
           /[a-z]/.test(c)
@@ -200,7 +211,6 @@ module.exports = [
       await ctx.reply(box('EXO EMOJIFY', [out]));
     }
   },
-
   {
     name: 'mock',
     category: 'FUN',
@@ -213,9 +223,8 @@ module.exports = [
         .map((c, i) => (i % 2 ? c.toUpperCase() : c.toLowerCase()))
         .join('');
       await ctx.reply(box('EXO MOCK', [out]));
-    } 
+    }
   },
-
   {
     name: 'reverse',
     category: 'FUN',
@@ -226,7 +235,6 @@ module.exports = [
       await ctx.reply(box('EXO REVERSE', [[...text].reverse().join('')]));
     }
   },
-
   {
     name: 'slot',
     category: 'FUN',
@@ -235,33 +243,67 @@ module.exports = [
       const icons = ['🍒', '🍋', '🍇', '🔔', '💎', '7️⃣'];
       const r = [pick(icons), pick(icons), pick(icons)];
       const win = r[0] === r[1] && r[1] === r[2];
-      const two = !win && (r[0] === r[1] || r[1] === r[2] || r[0] === r[2]);
-      await ctx.reply(
-        box('EXO SLOTS', [
-          `[ ${r.join(' | ')} ]`,
-          win ? '🎉 JACKPOT!!! 🎉' : two ? 'So close! 😮' : 'You lose 💀 Try again!'
-        ])
+      const two = !win && (
+        r[0] === r[1] ||
+        r[1] === r[2] ||
+        r[0] === r[2]
       );
+      await ctx.reply(box('EXO SLOTS', [
+        `[ ${r.join(' | ')} ]`,
+        win ? '🎉 JACKPOT!!! 🎉' :
+        two ? 'So close! 😮' :
+        'You lose 💀 Try again!'
+      ]));
     }
   },
-
   {
     name: 'rps',
     category: 'FUN',
     menu: ['rps'],
     run: async (ctx) => {
-      const choices = { rock: '🪨', paper: '📄', scissors: '✂️' };
+      const choices = {
+        rock: '🪨',
+        paper: '📄',
+        scissors: '✂️'
+      };
       const user = getArgs(ctx).toLowerCase();
       if (!choices[user]) {
-        return ctx.reply(box('EXO RPS', ['Pick one: rock, paper or scissors', 'Example: .rps rock']));
+        return ctx.reply(box('EXO RPS', [
+          'Pick one: rock, paper or scissors',
+          'Example: .rps rock'
+        ]));
       }
       const bot = pick(Object.keys(choices));
-      const beats = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+      const beats = {
+        rock: 'scissors',
+        paper: 'rock',
+        scissors: 'paper'
+      };
       const result =
         user === bot ? "It's a tie 🤝" :
-        beats[user] === bot ? 'You win 🎉' : 'I win 😎';
-      await ctx.reply(
-        box('EXO RPS', [`You: ${choices[user]} ${user}`, `Me: ${choices[bot]} ${bot}`, result])
-      );
+        beats[user] === bot ? 'You win 🎉' :
+        'I win 😎';
+      await ctx.reply(box('EXO RPS', [
+        `You: ${choices[user]} ${user}`,
+        `Me: ${choices[bot]} ${bot}`,
+        result
+      ]));
     }
-  }];
+  },
+  {
+    name: 'joke',
+    category: 'FUN',
+    menu: ['joke'],
+    run: async (ctx) => {
+      const jokes = [
+        "Why did the computer go to the doctor? Because it had a virus! 😂",
+        "Why was the math book sad? Because it had too many problems! 🤣",
+        "Why don't skeletons fight? They don't have the guts! 💀",
+        "Why did the phone wear glasses? It lost its contacts! 😂",
+        "What do you call a sleeping bull? A bulldozer! 🤣"
+      ];
+      const joke = pick(jokes);
+      await ctx.reply(box('EXO JOKES', [joke]));
+    }
+  }
+];
