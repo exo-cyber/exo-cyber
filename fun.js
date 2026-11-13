@@ -213,7 +213,7 @@ module.exports = [
         .map((c, i) => (i % 2 ? c.toUpperCase() : c.toLowerCase()))
         .join('');
       await ctx.reply(box('EXO MOCK', [out]));
-    }
+    } 
   },
 
   {
@@ -264,8 +264,8 @@ module.exports = [
         box('EXO RPS', [`You: ${choices[user]} ${user}`, `Me: ${choices[bot]} ${bot}`, result])
       );
     }
-  }
-];
+  },
+  
   {
     name: 'joke',
     category: 'FUN',
