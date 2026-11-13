@@ -266,8 +266,6 @@ module.exports = [
     }
   }
 ];
-  },
-
   {
     name: 'joke',
     category: 'FUN',
