@@ -1,4 +1,4 @@
-c// plugins/group.js
+// plugins/group.js
 const num = (j) => j.split('@')[0].split(':')[0]
 
 async function guard(ctx, needBotAdmin = true) {
