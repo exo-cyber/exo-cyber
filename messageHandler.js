@@ -1,166 +1,496 @@
-// Decides what to do with each incoming message:
-// learn ids -> AFK -> commands -> Nick protection -> AI chat (if Exo-Cyber is addressed)
+
+'use strict';
+
+// ==========================================
+// EXO-CYBER WHATSAPP BOT
+// MAIN MESSAGE HANDLER
+// ==========================================
+
 const config = require('./config');
 const log = require('./logger');
 const { numberOf } = require('./jid');
 const { fmtDuration } = require('./time');
 const { isDuplicate } = require('./dedupe');
 const { unwrap, getText, getContext } = require('./helpers');
+
 const commands = require('./index');
 const nick = require('./nick');
 const settings = require('./settings');
 const memory = require('./memory');
 const fallback = require('./fallback');
-const { systemPrompt, offlineReply, nameCallReply } = require('./personality');
+
+const {
+  systemPrompt,
+  offlineReply,
+  nameCallReply
+} = require('./personality');
+
+// ==========================================
+// STORAGE
+// ==========================================
 
 const lastAiAt = new Map();
 const afkNoticeAt = new Map();
 
-// Ids of messages Exo-Cyber himself sent. A reply to one of these is a reply to Exo-Cyber,
-// whatever id (phone number or hidden LID) WhatsApp shows for him.
 const sentIds = new Map();
-const extraBotIds = new Set(); // his other ids, learned from those replies
+const extraBotIds = new Set();
 const wrapped = new WeakSet();
+
+// ==========================================
+// TRACK BOT MESSAGES
+// ==========================================
+
 function trackSent(sock) {
   if (wrapped.has(sock)) return;
+
   wrapped.add(sock);
+
   const original = sock.sendMessage.bind(sock);
+
   sock.sendMessage = async (...args) => {
-    const res = await original(...args);
-    const id = res && res.key && res.key.id;
+    const result = await original(...args);
+
+    const id = result?.key?.id;
+
     if (id) {
       sentIds.set(id, Date.now());
-      if (sentIds.size > 1000) for (const k of sentIds.keys()) { sentIds.delete(k); if (sentIds.size <= 800) break; }
+
+      if (sentIds.size > 1000) {
+        for (const key of sentIds.keys()) {
+          sentIds.delete(key);
+
+          if (sentIds.size <= 800) break;
+        }
+      }
     }
-    return res;
+
+    return result;
   };
 }
 
-const botNumbers = (sock) => [sock.user?.id, sock.user?.lid].filter(Boolean).map(numberOf).concat([...extraBotIds]);
+// ==========================================
+// BOT IDENTIFICATION
+// ==========================================
 
-// WhatsApp can show the same person as a phone number AND as a hidden id (LID).
-// When we see both for a known owner/protected person, remember both.
-function learnAliases(msg) {
-  const k = msg.key;
-  const ids = [k.participant, k.participantAlt, k.participantPn, k.remoteJidAlt, k.remoteJid]
-    .filter((j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@lid')))
-    .map(numberOf);
-  const uniq = [...new Set(ids)];
-  if (uniq.length < 2) return;
-  if (uniq.some((n) => settings.isOwner(n))) settings.addClaimed(uniq);
-  else if (uniq.some((n) => settings.protectedIds().includes(n))) settings.addProtectAlias(uniq);
+function botNumbers(sock) {
+  return [
+    sock.user?.id,
+    sock.user?.lid
+  ]
+    .filter(Boolean)
+    .map(numberOf)
+    .concat([...extraBotIds]);
 }
 
-// In groups Exo-Cyber only answers when addressed: his name, an @mention, or a reply to him.
+// ==========================================
+// LEARN WHATSAPP ALIASES
+// ==========================================
+
+function learnAliases(msg) {
+  const k = msg.key || {};
+
+  const ids = [
+    k.participant,
+    k.participantAlt,
+    k.participantPn,
+    k.remoteJidAlt,
+    k.remoteJid
+  ]
+    .filter(j =>
+      typeof j === 'string' &&
+      (j.endsWith('@s.whatsapp.net') || j.endsWith('@lid'))
+    )
+    .map(numberOf);
+
+  const unique = [...new Set(ids)];
+
+  if (unique.length < 2) return;
+
+  if (unique.some(n => settings.isOwner(n))) {
+    settings.addClaimed(unique);
+  } else if (
+    unique.some(n => settings.protectedIds().includes(n))
+  ) {
+    settings.addProtectAlias(unique);
+  }
+}
+
+// ==========================================
+// CHECK IF BOT IS ADDRESSED
+// ==========================================
+
 function isAddressed(ctx, bots) {
   if (!ctx.isGroup) return true;
-  if (/\bexo[- ]?cyber\b/i.test(ctx.text)) return true;
-  const quotedId = ctx.ctxInfo?.stanzaId;
-  if (quotedId && sentIds.has(quotedId)) {           // a reply to something Exo-Cyber said
-    if (ctx.ctxInfo.participant) extraBotIds.add(numberOf(ctx.ctxInfo.participant));
+
+  if (/\bexo[- ]?cyber\b/i.test(ctx.text)) {
     return true;
   }
-  if (ctx.mentioned.some((j) => bots.includes(numberOf(j)))) return true;
-  if (ctx.ctxInfo?.participant && bots.includes(numberOf(ctx.ctxInfo.participant))) return true;
+
+  const quotedId = ctx.ctxInfo?.stanzaId;
+
+  // Reply to a message sent by Exo-Cyber
+  if (quotedId && sentIds.has(quotedId)) {
+    if (ctx.ctxInfo?.participant) {
+      extraBotIds.add(numberOf(ctx.ctxInfo.participant));
+    }
+
+    return true;
+  }
+
+  // Bot mention
+  if (
+    ctx.mentioned.some(j =>
+      bots.includes(numberOf(j))
+    )
+  ) {
+    return true;
+  }
+
+  // Reply to bot participant
+  if (
+    ctx.ctxInfo?.participant &&
+    bots.includes(numberOf(ctx.ctxInfo.participant))
+  ) {
+    return true;
+  }
+
   return false;
 }
 
+// ==========================================
+// AFK HANDLING
+// ==========================================
+
 async function afkHandling(ctx, isAfkCommand) {
-  // 1) The AFK person is back
+
+  // Check if AFK user has returned
   const mine = settings.getAfk(ctx.senderNum);
+
   if (mine && !isAfkCommand) {
     settings.clearAfk(ctx.senderNum);
-    await ctx.reply(`Back already? You were gone ${fmtDuration(Date.now() - mine.since)}.`);
+
+    await ctx.reply(
+      `Welcome back! You were away for ${fmtDuration(
+        Date.now() - mine.since
+      )}.`
+    );
   }
-  // 2) Someone tagged / replied to an AFK person (groups only, max once per 5 min per person)
+
   if (!ctx.isGroup) return;
-  const targets = [...new Set([...ctx.mentioned, ctx.ctxInfo?.participant].filter(Boolean).map(numberOf))];
+
+  // Check mentioned and replied users
+  const targets = [
+    ...new Set([
+      ...ctx.mentioned,
+      ctx.ctxInfo?.participant
+    ]
+      .filter(Boolean)
+      .map(numberOf))
+  ];
+
   for (const n of targets) {
     const afk = settings.getAfk(n);
+
     if (!afk || n === ctx.senderNum) continue;
+
     const key = `${ctx.jid}:${n}`;
-    if (Date.now() - (afkNoticeAt.get(key) || 0) < 5 * 60 * 1000) continue;
+
+    if (
+      Date.now() - (afkNoticeAt.get(key) || 0) <
+      5 * 60 * 1000
+    ) {
+      continue;
+    }
+
     afkNoticeAt.set(key, Date.now());
-    await ctx.reply(`${afk.name || 'They'} is AFK: ${afk.reason} (${fmtDuration(Date.now() - afk.since)} ago).`);
+
+    await ctx.reply(
+      `${afk.name || 'This person'} is AFK: ${afk.reason} ` +
+      `(${fmtDuration(Date.now() - afk.since)} ago).`
+    );
   }
 }
+
+// ==========================================
+// MAIN MESSAGE HANDLER
+// ==========================================
 
 async function handleMessage(sock, msg) {
-  trackSent(sock);
-  const receivedAt = Date.now();
-  if (!msg.message || msg.key.fromMe) return;
-  const jid = msg.key.remoteJid;
-  if (!jid || jid.endsWith('@broadcast') || jid.endsWith('@newsletter')) return;
-  if (isDuplicate(msg.key.id)) return;
 
-  const ts = Number(msg.messageTimestamp) || 0;
-  if (ts && Date.now() / 1000 - ts > 120) return; // ignore old backlog after reconnect
+  try {
 
-  const m = unwrap(msg.message);
-  if (!m || m.protocolMessage || m.reactionMessage || (m.senderKeyDistributionMessage && Object.keys(m).length === 1)) return;
+    trackSent(sock);
 
-  learnAliases(msg);
+    const receivedAt = Date.now();
 
-  const text = getText(m).trim();
-  const isGroup = jid.endsWith('@g.us');
-  const sender = msg.key.participant || jid;
-  const senderNum = numberOf(sender);
-  const ctxInfo = getContext(m);
-  const prefix = settings.prefix();
+    if (!msg?.message || msg.key?.fromMe) return;
 
-  const ctx = {
-    sock, msg, m, jid, sender, senderNum, text, isGroup, ctxInfo, receivedAt,
-    pushName: msg.pushName || '',
-    mentioned: ctxInfo?.mentionedJid || [],
-    isOwner: settings.isOwner(senderNum),
-    reply: (t, extra = {}) => sock.sendMessage(jid, { text: t, ...extra }, { quoted: msg }),
-  };
+    const jid = msg.key?.remoteJid;
 
-  const isCmd = text.startsWith(prefix);
-  const isAfkCommand = isCmd && /^afk(\s|$)/i.test(text.slice(prefix.length).trim());
+    if (!jid) return;
 
-  // 0) AFK bookkeeping (never blocks the rest)
-  await afkHandling(ctx, isAfkCommand).catch((e) => log.warn('AFK handling failed:', e.message));
+    if (
+      jid.endsWith('@broadcast') ||
+      jid.endsWith('@newsletter')
+    ) {
+      return;
+    }
 
-  // 1) Commands
-  if (isCmd && (await commands.run(ctx))) return;
+    // Prevent duplicate messages
+    if (isDuplicate(msg.key?.id)) return;
 
-  // 2) Nick protection: react + reply
-  const protect = nick.check(ctx);
-  if (protect) {
-    await sock.sendMessage(jid, { react: { text: protect.emoji, key: msg.key } }).catch(() => {});
-    await ctx.reply(protect.reply);
-    return;
+    // Ignore old messages after reconnect
+    const timestamp = Number(msg.messageTimestamp) || 0;
+
+    if (
+      timestamp &&
+      Date.now() / 1000 - timestamp > 120
+    ) {
+      return;
+    }
+
+    // Extract WhatsApp message
+    const m = unwrap(msg.message);
+
+    if (
+      !m ||
+      m.protocolMessage ||
+      m.reactionMessage ||
+      (
+        m.senderKeyDistributionMessage &&
+        Object.keys(m).length === 1
+      )
+    ) {
+      return;
+    }
+
+    // Learn phone number and LID aliases
+    learnAliases(msg);
+
+    // Message information
+    const text = getText(m).trim();
+
+    const isGroup = jid.endsWith('@g.us');
+
+    const sender = msg.key.participant || jid;
+
+    const senderNum = numberOf(sender);
+
+    const ctxInfo = getContext(m);
+
+    const prefix = settings.prefix();
+
+    // ======================================
+    // COMMAND CONTEXT
+    // ======================================
+
+    const ctx = {
+      sock,
+      msg,
+      m,
+      jid,
+      sender,
+      senderNum,
+      text,
+      isGroup,
+      ctxInfo,
+      receivedAt,
+
+      pushName: msg.pushName || '',
+
+      mentioned: ctxInfo?.mentionedJid || [],
+
+      isOwner: settings.isOwner(senderNum),
+
+      reply: (message, extra = {}) =>
+        sock.sendMessage(
+          jid,
+          {
+            text: message,
+            ...extra
+          },
+          {
+            quoted: msg
+          }
+        )
+    };
+
+    // ======================================
+    // DETECT COMMANDS
+    // ======================================
+
+    const isCmd = text.startsWith(prefix);
+
+    const isAfkCommand =
+      isCmd &&
+      /^afk(\s|$)/i.test(
+        text.slice(prefix.length).trim()
+      );
+
+    // ======================================
+    // 1. AFK SYSTEM
+    // ======================================
+
+    await afkHandling(ctx, isAfkCommand).catch(error => {
+      log.warn('AFK handling failed:', error.message);
+    });
+
+    // ======================================
+    // 2. COMMAND SYSTEM
+    // ======================================
+
+    if (isCmd) {
+      const handled = await commands.run(ctx);
+
+      if (handled) return;
+    }
+
+    // ======================================
+    // 3. NICK PROTECTION
+    // ======================================
+
+    const protect = nick.check(ctx);
+
+    if (protect) {
+
+      await sock.sendMessage(
+        jid,
+        {
+          react: {
+            text: protect.emoji,
+            key: msg.key
+          }
+        }
+      ).catch(() => {});
+
+      await ctx.reply(protect.reply);
+
+      return;
+    }
+
+    // ======================================
+    // 4. AI CHAT SYSTEM
+    // ======================================
+
+    if (!text) return;
+
+    if (!settings.isAiOn(jid)) return;
+
+    if (!isAddressed(ctx, botNumbers(sock))) return;
+
+    // Respond when someone calls Exo-Cyber
+    if (
+      /^@?\s*exo[- ]?cyber[\s!?.,]*$/i.test(text)
+    ) {
+      await ctx.reply(nameCallReply());
+      return;
+    }
+
+    // ======================================
+    // AI COOLDOWN
+    // ======================================
+
+    const last = lastAiAt.get(senderNum) || 0;
+
+    if (
+      Date.now() - last <
+      config.ai.userCooldownMs
+    ) {
+      return;
+    }
+
+    lastAiAt.set(senderNum, Date.now());
+
+    // ======================================
+    // AI TYPING INDICATOR
+    // ======================================
+
+    await sock.sendPresenceUpdate(
+      'composing',
+      jid
+    ).catch(() => {});
+
+    // ======================================
+    // AI MEMORY AND PROMPT
+    // ======================================
+
+    const messages = [
+      {
+        role: 'system',
+        content: systemPrompt({
+          isGroup,
+          name: ctx.pushName
+        })
+      },
+
+      ...memory.get(senderNum),
+
+      {
+        role: 'user',
+        content: text
+      }
+    ];
+
+    // ======================================
+    // GENERATE AI RESPONSE
+    // ======================================
+
+    const result = await fallback.generate(messages);
+
+    await sock.sendPresenceUpdate(
+      'paused',
+      jid
+    ).catch(() => {});
+
+    // ======================================
+    // AI OFFLINE RESPONSE
+    // ======================================
+
+    if (!result) {
+
+      log.warn(
+        'All AI providers failed for a message.'
+      );
+
+      await ctx.reply(offlineReply());
+
+      return;
+    }
+
+    // ======================================
+    // SAVE CONVERSATION MEMORY
+    // ======================================
+
+    memory.add(senderNum, 'user', text);
+
+    memory.add(
+      senderNum,
+      'assistant',
+      result.text
+    );
+
+    // ======================================
+    // SEND AI RESPONSE
+    // ======================================
+
+    await ctx.reply(result.text);
+
+  } catch (error) {
+
+    log.warn(
+      'Message handler error:',
+      error.stack || error.message
+    );
+
   }
-
-  // 3) AI conversation
-  if (!text || !settings.isAiOn(jid) || !isAddressed(ctx, botNumbers(sock))) return;
-
-  // Just his name ("Exo-Cyber") -> a quick answer with no AI call.
-  if (/^@?\s*exo[- ]?cyber[\s!?.,]*$/i.test(text)) { await ctx.reply(nameCallReply()); return; }
-
-  const last = lastAiAt.get(senderNum) || 0;
-  if (Date.now() - last < config.ai.userCooldownMs) return;
-  lastAiAt.set(senderNum, Date.now());
-
-  await sock.sendPresenceUpdate('composing', jid).catch(() => {});
-  const messages = [
-    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName }) },
-    ...memory.get(senderNum),
-    { role: 'user', content: text },
-  ];
-  const result = await fallback.generate(messages);
-  await sock.sendPresenceUpdate('paused', jid).catch(() => {});
-
-  if (!result) {
-    log.warn('All AI providers failed for a message.');
-    await ctx.reply(offlineReply());
-    return;
-  }
-  memory.add(senderNum, 'user', text);
-  memory.add(senderNum, 'assistant', result.text);
-  await ctx.reply(result.text);
 }
 
-module.exports = { handleMessage };
+// ==========================================
+// EXPORT
+// ==========================================
+
+module.exports = {
+  handleMessage
+};
+
 
