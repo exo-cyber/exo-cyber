@@ -1,3 +1,4 @@
+
 'use strict';
 
 // ==========================================
@@ -17,7 +18,10 @@ const store = createStore('settings', {
   protectEnabled: null,
   claimedOwnerIds: [],
   protectedAliases: [],
-  afk: {}
+  afk: {},
+  sudoUsers: [],
+  botMode: 'public',
+  antiLinkMode: 'off'
 });
 
 // ==========================================
@@ -63,7 +67,6 @@ function configuredOwners() {
   return uniqueNumbers([
     process.env.OWNER_NUMBER,
     process.env.OWNER_NUMBERS,
-
     config.owner,
     config.owners,
     config.ownerNumber,
@@ -77,15 +80,82 @@ function configuredOwners() {
 
 function isOwner(number) {
   const n = normalize(number);
-
   if (!n) return false;
 
-  const owners = [
+  return [
     ...configuredOwners(),
     ...(store.data.claimedOwnerIds || [])
-  ];
+  ].includes(n);
+}
 
-  return owners.includes(n);
+// ==========================================
+// SUDO SYSTEM
+// ==========================================
+
+function getSudoUsers() {
+  return uniqueNumbers(store.data.sudoUsers || []);
+}
+
+function isSudo(number) {
+  const n = normalize(number);
+  return Boolean(n && (isOwner(n) || getSudoUsers().includes(n)));
+}
+
+function addSudo(number) {
+  const ids = uniqueNumbers(number);
+  store.data.sudoUsers = uniqueNumbers([
+    ...getSudoUsers(),
+    ...ids
+  ]);
+  save();
+}
+
+function delSudo(number) {
+  const ids = uniqueNumbers(number);
+
+  store.data.sudoUsers = getSudoUsers().filter(
+    id => !ids.includes(id)
+  );
+
+  save();
+}
+
+// ==========================================
+// BOT MODE
+// ==========================================
+
+function getMode() {
+  return store.data.botMode === 'private' ? 'private' : 'public';
+}
+
+function setMode(mode) {
+  if (!['private', 'public'].includes(mode)) return false;
+
+  store.data.botMode = mode;
+  save();
+  return true;
+}
+
+// ==========================================
+// ANTI-LINK SYSTEM
+// ==========================================
+
+function getAntiLinkMode() {
+  const allowed = ['off', 'delete', 'kick', 'kickanddelete'];
+
+  return allowed.includes(store.data.antiLinkMode)
+    ? store.data.antiLinkMode
+    : 'off';
+}
+
+function setAntiLinkMode(mode) {
+  const allowed = ['off', 'delete', 'kick', 'kickanddelete'];
+
+  if (!allowed.includes(mode)) return false;
+
+  store.data.antiLinkMode = mode;
+  save();
+  return true;
 }
 
 // ==========================================
@@ -95,12 +165,8 @@ function isOwner(number) {
 function addClaimed(numbers) {
   const ids = uniqueNumbers(numbers);
 
-  if (!Array.isArray(store.data.claimedOwnerIds)) {
-    store.data.claimedOwnerIds = [];
-  }
-
   store.data.claimedOwnerIds = uniqueNumbers([
-    ...store.data.claimedOwnerIds,
+    ...(store.data.claimedOwnerIds || []),
     ...ids
   ]);
 
@@ -128,12 +194,8 @@ function protectedIds() {
 function addProtectAlias(numbers) {
   const ids = uniqueNumbers(numbers);
 
-  if (!Array.isArray(store.data.protectedAliases)) {
-    store.data.protectedAliases = [];
-  }
-
   store.data.protectedAliases = uniqueNumbers([
-    ...store.data.protectedAliases,
+    ...(store.data.protectedAliases || []),
     ...ids
   ]);
 
@@ -179,7 +241,6 @@ function getAfk(number) {
 
 function setAfk(number, reason = 'AFK', name = '') {
   const n = normalize(number);
-
   if (!n) return;
 
   store.data.afk[n] = {
@@ -193,11 +254,9 @@ function setAfk(number, reason = 'AFK', name = '') {
 
 function clearAfk(number) {
   const n = normalize(number);
-
   if (!n) return;
 
   delete store.data.afk[n];
-
   save();
 }
 
@@ -209,17 +268,21 @@ async function init() {
   await store.load();
 
   store.data.aiOff = store.data.aiOff || {};
-
-  store.data.claimedOwnerIds =
-    store.data.claimedOwnerIds || [];
-
-  store.data.protectedAliases =
-    store.data.protectedAliases || [];
-
+  store.data.claimedOwnerIds = store.data.claimedOwnerIds || [];
+  store.data.protectedAliases = store.data.protectedAliases || [];
   store.data.afk = store.data.afk || {};
+  store.data.sudoUsers = store.data.sudoUsers || [];
 
   if (store.data.protectEnabled === undefined) {
     store.data.protectEnabled = null;
+  }
+
+  if (!['private', 'public'].includes(store.data.botMode)) {
+    store.data.botMode = 'public';
+  }
+
+  if (!['off', 'delete', 'kick', 'kickanddelete'].includes(store.data.antiLinkMode)) {
+    store.data.antiLinkMode = 'off';
   }
 
   console.log('[SETTINGS] Settings loaded successfully.');
@@ -234,6 +297,17 @@ module.exports = {
 
   isOwner,
   addClaimed,
+
+  isSudo,
+  getSudoUsers,
+  addSudo,
+  delSudo,
+
+  getMode,
+  setMode,
+
+  getAntiLinkMode,
+  setAntiLinkMode,
 
   protectedIds,
   addProtectAlias,
