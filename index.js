@@ -1,46 +1,82 @@
-// Command registry. Add a command by adding it to one of the modules below
-// (or a new module). The menu updates itself automatically.
-const config = require('./config');
-const log = require('./logger');
+'use strict';
 
+// ==========================================
+// SAFE PLUGIN LOADER
+// ==========================================
 
-const modules = [
-  require('./general'),
-  require('./ai'),
-  require('./sticker'),
-  require('./music'),
-  require('./profile'),
-  require('./fun'),
-  require('./viewonce'),
-  require('./group')
+const files = [
+  './viewonce', // first, so .vv/.cute/.damn win over any old text-only versions
+  './general',
+  './ai',
+  './sticker',
+  './music',
+  './profile',
+  './fun',
+  './group'
 ];
 
-const list = [];
-const byName = new Map();
-for (const mod of modules) {
-  for (const cmd of mod) {
-    list.push(cmd);
-    byName.set(cmd.name, cmd);
-    (cmd.aliases || []).forEach((a) => byName.set(a, cmd));
+function load(file) {
+  try {
+    const mod = require(file);
+    // supports module.exports = [..], exports.default = [..], or a single command object
+    return [mod && mod.default !== undefined ? mod.default : mod]
+      .flat(Infinity)
+      .filter(cmd => cmd && typeof cmd.name === 'string' && typeof cmd.run === 'function');
+  } catch (err) {
+    console.error(`[plugins] failed to load ${file}:`, err.message);
+    return [];
   }
 }
 
-// Returns true if the message was a known command (and was handled).
+// ==========================================
+// COMBINE ALL COMMANDS
+// ==========================================
+
+const commands = files.flatMap(load);
+
+// ==========================================
+// COMMAND RUNNER
+// ==========================================
+
 async function run(ctx) {
-  const [name, ...args] = ctx.text.slice(config.prefix.length).trim().split(/\s+/);
-  const cmd = byName.get((name || '').toLowerCase());
-  if (!cmd) return false;
-  ctx.args = args;
-  ctx.argText = args.join(' ');
-  ctx.commandList = list;
-  try {
-    if (cmd.ownerOnly && !ctx.isOwner) { await ctx.reply('That one is for the owner only.'); return true; }
-    await cmd.run(ctx);
-  } catch (e) {
-    log.error(`Command ${cmd.name} failed:`, e.message);
-    await ctx.reply("That didn't work. Try again in a bit.").catch(() => {});
+  const prefix = '.';
+
+  if (!ctx.text || !ctx.text.startsWith(prefix)) {
+    return false;
   }
+
+  const input = ctx.text.slice(prefix.length).trim();
+
+  if (!input) return false;
+
+  const [name, ...args] = input.split(/\s+/);
+  const lower = name.toLowerCase();
+
+  const command = commands.find(cmd =>
+    cmd.name === lower ||
+    cmd.aliases?.includes(lower)
+  );
+
+  if (!command) return false;
+
+  try {
+    await command.run({
+      ...ctx,
+      // raw message, so .vv can read the quoted view-once message
+      msg: ctx.msg ?? ctx.m ?? ctx.message ?? ctx.info,
+      args,
+      text: args.join(' '),
+      command: lower
+    });
+  } catch (err) {
+    console.error(`[plugins] .${lower} crashed:`, err);
+    try { await ctx.reply?.('Something went wrong running that command'); } catch {}
+  }
+
   return true;
 }
 
-module.exports = { run, list };
+module.exports = {
+  run,
+  commands
+};
