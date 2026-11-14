@@ -26,6 +26,24 @@ const {
 } = require('./personality');
 
 // ==========================================
+// OWNER
+// ==========================================
+
+const OWNER_NUMBER = '2347075369608';
+
+function isOwnerNumber(number) {
+  return String(number) === OWNER_NUMBER || Boolean(settings.isOwner(number));
+}
+
+function isSudoNumber(number) {
+  if (isOwnerNumber(number)) return true;
+
+  return typeof settings.isSudo === 'function'
+    ? Boolean(settings.isSudo(number))
+    : false;
+}
+
+// ==========================================
 // STORAGE
 // ==========================================
 
@@ -34,6 +52,7 @@ const afkNoticeAt = new Map();
 const sentIds = new Map();
 const extraBotIds = new Set();
 const wrapped = new WeakSet();
+const aliasCache = new Map();
 
 // ==========================================
 // TRACK BOT MESSAGES
@@ -187,6 +206,59 @@ async function isBotGroupAdmin(sock, jid) {
       (p.admin === 'admin' || p.admin === 'superadmin')
     )
   );
+}
+
+// ==========================================
+// RESOLVE ALL IDS (PHONE + LID) OF A SENDER
+// WhatsApp groups often show members as @lid,
+// so we also look up their real phone number.
+// ==========================================
+
+async function resolveSenderNumbers(sock, msg, jid, isGroup, sender) {
+  const k = msg.key || {};
+
+  const direct = [
+    sender,
+    k.participant,
+    k.participantAlt,
+    k.participantPn,
+    k.remoteJidAlt
+  ].filter(j =>
+    typeof j === 'string' &&
+    (j.endsWith('@s.whatsapp.net') || j.endsWith('@lid'))
+  );
+
+  const nums = new Set(direct.map(numberOf));
+
+  // Already the owner, or we already have a real phone number: nothing to look up.
+  if (!isGroup || [...nums].some(isOwnerNumber)) return [...nums];
+  if (direct.some(j => j.endsWith('@s.whatsapp.net'))) return [...nums];
+
+  const lidNum = numberOf(sender);
+  const cached = aliasCache.get(lidNum);
+
+  if (cached && Date.now() - cached.at < 30 * 60 * 1000) {
+    cached.nums.forEach(n => nums.add(n));
+    return [...nums];
+  }
+
+  const metadata = await getGroupMetadata(sock, jid);
+
+  const member = metadata?.participants?.find(p =>
+    [p.id, p.lid, p.phoneNumber]
+      .filter(Boolean)
+      .some(x => numberOf(x) === lidNum)
+  );
+
+  const found = member
+    ? [member.id, member.lid, member.phoneNumber].filter(Boolean).map(numberOf)
+    : [];
+
+  aliasCache.set(lidNum, { nums: found, at: Date.now() });
+
+  found.forEach(n => nums.add(n));
+
+  return [...nums];
 }
 
 // ==========================================
@@ -418,20 +490,26 @@ async function handleMessage(sock, msg) {
 
     const prefix = config.prefix || '.';
 
-    const owner = settings.isOwner(senderNum);
+    // Every ID this sender is known by (phone number and LID)
+    const senderNums = await resolveSenderNumbers(
+      sock,
+      msg,
+      jid,
+      isGroup,
+      sender
+    );
 
-    const sudo =
-      typeof settings.isSudo === 'function'
-        ? settings.isSudo(senderNum)
-        : owner;
+    const owner = senderNums.some(isOwnerNumber);
+    const sudo = owner || senderNums.some(isSudoNumber);
 
-    console.log('[OWNER DEBUG]', {
-      sender,
-      senderNum,
-      owner,
-      sudo,
-      expectedOwner: '2347075369608'
-    });
+    // Remember the owner's other IDs so later checks are instant
+    if (
+      owner &&
+      senderNums.length > 1 &&
+      typeof settings.addClaimed === 'function'
+    ) {
+      settings.addClaimed(senderNums);
+    }
 
     const ctx = {
       sock,
@@ -440,6 +518,7 @@ async function handleMessage(sock, msg) {
       jid,
       sender,
       senderNum,
+      senderNums,
       text,
       isGroup,
       ctxInfo,
