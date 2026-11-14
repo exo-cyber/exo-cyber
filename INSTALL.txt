@@ -1,0 +1,30 @@
+EXO-CYBER PATCH
+
+Files:
+- messageHandler.js: rebuilt handler with private/public gate and anti-link enforcement.
+- owner.js: .sudo, .delsudo, .mode, .antilink commands.
+- index.js: preserves your existing modules and registers owner.js; uses config.prefix.
+
+Install:
+1. Back up your current files.
+2. Replace messageHandler.js and index.js with these versions.
+3. Add owner.js beside index.js.
+4. Keep your uploaded settings.js, config.js, helpers.js, and general.js unchanged.
+5. Restart the bot and check Railway logs.
+
+Commands:
+- .sudo @user (owner only)
+- .delsudo @user (owner only)
+- .mode private
+- .mode public
+- .antilink off
+- .antilink delete
+- .antilink kick
+- .antilink kickanddelete
+- Aliases: .antilinkkick and .antilinkdelete
+
+Notes:
+- The bot needs group-admin permission to delete other users' messages and remove members.
+- Only the current group's own WhatsApp invite link is exempt; other group invite links and external URLs are moderated.
+- In private mode, only owner/sudo users can use bot commands or AI.
+- View-once media is not cached or extracted by this handler.

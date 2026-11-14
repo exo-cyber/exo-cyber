@@ -1,77 +1,53 @@
 'use strict';
 
-// ==========================================
-// SAFE PLUGIN LOADER
-// ==========================================
+const config = require('./config');
 
-const files = [
-  './viewonce', // first, so .vv/.cute/.damn win over any old text-only versions
-  './general',
-  './ai',
-  './sticker',
-  './music',
-  './profile',
-  './fun',
-  './group'
+const modules = [
+  require('./general'),
+  require('./ai'),
+  require('./sticker'),
+  require('./music'),
+  require('./profile'),
+  require('./fun'),
+  require('./viewonce'),
+  require('./group'),
+  require('./owner')
 ];
-
-function load(file) {
-  try {
-    const mod = require(file);
-    // supports module.exports = [..], exports.default = [..], or a single command object
-    return [mod && mod.default !== undefined ? mod.default : mod]
-      .flat(Infinity)
-      .filter(cmd => cmd && typeof cmd.name === 'string' && typeof cmd.run === 'function');
-  } catch (err) {
-    console.error(`[plugins] failed to load ${file}:`, err.message);
-    return [];
-  }
-}
 
 // ==========================================
 // COMBINE ALL COMMANDS
 // ==========================================
 
-const commands = files.flatMap(load);
+const commands = modules.flat(Infinity).filter(Boolean);
 
 // ==========================================
 // COMMAND RUNNER
 // ==========================================
 
 async function run(ctx) {
-  const prefix = '.';
+  const prefix = config.prefix || '.';
 
-  if (!ctx.text || !ctx.text.startsWith(prefix)) {
-    return false;
-  }
+  if (!ctx.text || !ctx.text.startsWith(prefix)) return false;
 
   const input = ctx.text.slice(prefix.length).trim();
-
   if (!input) return false;
 
   const [name, ...args] = input.split(/\s+/);
-  const lower = name.toLowerCase();
+  const commandName = name.toLowerCase();
 
   const command = commands.find(cmd =>
-    cmd.name === lower ||
-    cmd.aliases?.includes(lower)
+    cmd.name?.toLowerCase() === commandName ||
+    cmd.aliases?.some(alias => String(alias).toLowerCase() === commandName)
   );
 
   if (!command) return false;
 
-  try {
-    await command.run({
-      ...ctx,
-      // raw message, so .vv can read the quoted view-once message
-      msg: ctx.msg ?? ctx.m ?? ctx.message ?? ctx.info,
-      args,
-      text: args.join(' '),
-      command: lower
-    });
-  } catch (err) {
-    console.error(`[plugins] .${lower} crashed:`, err);
-    try { await ctx.reply?.('Something went wrong running that command'); } catch {}
-  }
+  await command.run({
+    ...ctx,
+    args,
+    text: args.join(' '),
+    command: commandName
+  });
 
   return true;
 }
