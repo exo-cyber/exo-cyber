@@ -278,7 +278,7 @@ async function handleMessage(sock, msg) {
 
     const ctxInfo = getContext(m);
 
-    const prefix = settings.prefix();
+    const prefix = settings.prefix(!);
 
     // ======================================
     // COMMAND CONTEXT
