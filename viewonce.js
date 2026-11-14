@@ -10,6 +10,8 @@ function toContent(type, buf, caption) {
 
 async function grab(ctx) {
   const id = ctx.ctxInfo?.stanzaId;
+  console.log('[vo] command used. replied id =', id, '| cache size =', vo.size());
+
   if (!id) {
     await ctx.reply('Reply to a view once first.');
     return null;
@@ -25,7 +27,11 @@ async function grab(ctx) {
     try {
       const buf = await vo.download(found.type, found.media);
       return toContent(found.type, buf, found.media.caption);
-    } catch {}
+    } catch (e) {
+      console.log('[vo] quoted download failed:', e.message);
+    }
+  } else {
+    console.log('[vo] quoted message has no view once media');
   }
 
   await ctx.reply('I did not catch that one. It must arrive while I am online.');
@@ -51,6 +57,14 @@ module.exports = [
       const content = await grab(ctx);
       if (!content) return;
       await ctx.sock.sendMessage(ctx.sender, content);
+    }
+  },
+  {
+    name: 'votest',
+    category: 'MEDIA',
+    menu: ['.votest (check view once system)'],
+    run: async (ctx) => {
+      await ctx.reply('View once system is loaded. Saved items: ' + vo.size());
     }
   }
 ];
