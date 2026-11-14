@@ -1,124 +1,45 @@
 
-'use strict';
+// plugins/viewonce.js
+const { downloadContentFromMessage } = require('@itsliaaa/baileys')
 
-// ==========================================
-// EXO-CYBER WHATSAPP BOT
-// CUTE & DAMN COMMANDS
-// ==========================================
+async function grab(ctx) {
+  const { sock, msg, jid, sender, reply } = ctx
+  const q = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+  if (!q) return reply('Reply to a view once first.')
 
-// Detect View Once messages
-function isViewOnce(message) {
-  if (!message || typeof message !== 'object') {
-    return false;
-  }
+  const inner =
+    q.viewOnceMessageV2?.message ||
+    q.viewOnceMessageV2Extension?.message ||
+    q.viewOnceMessage?.message || q
+  const type = Object.keys(inner).find(k => /image|video|audio/.test(k))
+  if (!type) return reply('No media in that message.')
 
-  for (const [key, value] of Object.entries(message)) {
-    if (/^viewOnceMessage(V2|V2Extension)?$/.test(key)) {
-      return true;
-    }
+  const media = inner[type]
+  const stream = await downloadContentFromMessage(media, type.replace('Message', ''))
+  let buf = Buffer.alloc(0)
+  for await (const c of stream) buf = Buffer.concat([buf, c])
 
-    if (
-      value &&
-      typeof value === 'object' &&
-      isViewOnce(value)
-    ) {
-      return true;
-    }
-  }
+  const content =
+    type === 'imageMessage' ? { image: buf, caption: media.caption || '' } :
+    type === 'videoMessage' ? { video: buf, caption: media.caption || '' } :
+    { audio: buf, mimetype: 'audio/mp4', ptt: true }
 
-  return false;
+  return { sock, content }
 }
-
-// Detect normal photos
-function isPhoto(message) {
-  if (!message || typeof message !== 'object') {
-    return false;
-  }
-
-  if (message.imageMessage) {
-    return true;
-  }
-
-  for (const key of [
-    'ephemeralMessage',
-    'documentWithCaptionMessage'
-  ]) {
-    if (message[key]?.message &&
-        isPhoto(message[key].message)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-// ==========================================
-// COMMANDS
-// ==========================================
 
 module.exports = [
   {
-    name: 'damn',
-    category: 'FUN',
-    menu: ['damn'],
-
+    name: 'damn', category: 'Media', menu: 'reveal view once in chat',
     run: async (ctx) => {
-      const quoted = ctx.ctxInfo?.quotedMessage;
-
-      if (!quoted) {
-        return ctx.reply(
-          'Reply to a photo with .damn'
-        );
-      }
-
-      if (isViewOnce(quoted)) {
-        return ctx.reply(
-          '😈 Damn! That was a View Once message.'
-        );
-      }
-
-      if (isPhoto(quoted)) {
-        return ctx.reply(
-          '😈 DAMNN! That picture is something else!'
-        );
-      }
-
-      return ctx.reply(
-        'Please reply to a photo with .damn'
-      );
+      const r = await grab(ctx); if (!r?.content) return
+      await r.sock.sendMessage(ctx.jid, r.content, { quoted: ctx.msg })
     }
   },
-
   {
-    name: 'cute',
-    category: 'FUN',
-    menu: ['cute'],
-
+    name: 'cute', category: 'Media', menu: 'send view once to your DM',
     run: async (ctx) => {
-      const quoted = ctx.ctxInfo?.quotedMessage;
-
-      if (!quoted) {
-        return ctx.reply(
-          'Reply to a photo with .cute'
-        );
-      }
-
-      if (isViewOnce(quoted)) {
-        return ctx.reply(
-          '🥰 Cute! That was a View Once message.'
-        );
-      }
-
-      if (isPhoto(quoted)) {
-        return ctx.reply(
-          '🥰 Awww! Such a cute picture!'
-        );
-      }
-
-      return ctx.reply(
-        'Please reply to a photo with .cute'
-      );
+      const r = await grab(ctx); if (!r?.content) return
+      await r.sock.sendMessage(ctx.sender, r.content)
     }
   }
-];
-;
+]
