@@ -1,5 +1,3 @@
-
-
 'use strict';
 
 // ==========================================
@@ -66,32 +64,15 @@ function save() {
 // ==========================================
 
 function configuredOwners() {
-  return uniqueNumbers([
-    '2347075369608',
-
-    process.env.OWNER_NUMBER,
-    process.env.OWNER_NUMBERS,
-
-    config.owner?.ids,
-    config.owner?.number,
-    config.owners,
-    config.ownerNumber,
-    config.ownerNumbers,
-    config.ownerJid,
-    config.ownerJids,
-    config.creator,
-    config.sudo
-  ].filter(Boolean));
+  return ['2347075369608'];
 }
 
 function isOwner(number) {
-  const n = normalize(number);
-  if (!n) return false;
+  return normalize(number) === '2347075369608';
+}
 
-  return [
-    ...configuredOwners(),
-    ...(store.data.claimedOwnerIds || [])
-  ].includes(n);
+function addClaimed() {
+  // Automatic aliases must not receive owner privileges.
 }
 
 // ==========================================
@@ -187,15 +168,8 @@ function setAntiLinkMode(mode) {
 // OWNER ALIASES
 // ==========================================
 
-function addClaimed(numbers) {
-  const ids = uniqueNumbers(numbers);
-
-  store.data.claimedOwnerIds = uniqueNumbers([
-    ...(store.data.claimedOwnerIds || []),
-    ...ids
-  ]);
-
-  save();
+function addClaimed() {
+  // Disabled: owner identity is fixed.
 }
 
 // ==========================================
@@ -293,7 +267,7 @@ async function init() {
   await store.load();
 
   store.data.aiOff = store.data.aiOff || {};
-  store.data.claimedOwnerIds = store.data.claimedOwnerIds || [];
+  store.data.claimedOwnerIds = [];
   store.data.protectedAliases = store.data.protectedAliases || [];
   store.data.afk = store.data.afk || {};
   store.data.sudoUsers = store.data.sudoUsers || [];

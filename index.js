@@ -1,7 +1,5 @@
 'use strict';
 
-const config = require('./config');
-
 const modules = [
   require('./general'),
   require('./ai'),
@@ -11,7 +9,11 @@ const modules = [
   require('./fun'),
   require('./viewonce'),
   require('./group'),
-  require('./owner')
+  require('./interaction'),
+  require('./admin'),
+  require('./interaction'),
+  require('./owner'),
+  require('./tools')
 ];
 
 // ==========================================
@@ -25,19 +27,21 @@ const commands = modules.flat(Infinity).filter(Boolean);
 // ==========================================
 
 async function run(ctx) {
-  const prefix = config.prefix || '.';
+  const prefix = '.';
 
-  if (!ctx.text || !ctx.text.startsWith(prefix)) return false;
+  if (!ctx.text || !ctx.text.startsWith(prefix)) {
+    return false;
+  }
 
   const input = ctx.text.slice(prefix.length).trim();
+
   if (!input) return false;
 
   const [name, ...args] = input.split(/\s+/);
-  const commandName = name.toLowerCase();
 
   const command = commands.find(cmd =>
-    cmd.name?.toLowerCase() === commandName ||
-    cmd.aliases?.some(alias => String(alias).toLowerCase() === commandName)
+    cmd.name === name.toLowerCase() ||
+    cmd.aliases?.includes(name.toLowerCase())
   );
 
   if (!command) return false;
@@ -46,7 +50,7 @@ async function run(ctx) {
     ...ctx,
     args,
     text: args.join(' '),
-    command: commandName
+    command: name.toLowerCase()
   });
 
   return true;
