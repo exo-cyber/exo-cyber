@@ -1,70 +1,86 @@
-'use strict';
+// plugins/viewonce.js
+import { downloadContentFromMessage } from '@whiskeysockets/baileys'
+// ^ swap to your fork's package name (e.g. the itsliaaa fork) if it differs
 
-const vo = require('./vocache');
+const VO_WRAPPERS = ['viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension']
+const MEDIA_TYPES = { imageMessage: 'image', videoMessage: 'video', audioMessage: 'audio' }
 
-function toContent(type, buf, caption) {
-  if (type === 'imageMessage') return { image: buf, caption: caption || '' };
-  if (type === 'videoMessage') return { video: buf, caption: caption || '' };
-  return { audio: buf, mimetype: 'audio/mp4', ptt: true };
-}
+// Unwrap the quoted message and return { type, media } if it's view-once media
+function extractViewOnce(quoted) {
+  if (!quoted) return null
 
-async function grab(ctx) {
-  const id = ctx.ctxInfo?.stanzaId;
-  console.log('[vo] command used. replied id =', id, '| cache size =', vo.size());
-
-  if (!id) {
-    await ctx.reply('Reply to a view once first.');
-    return null;
+  let inner = quoted
+  let wrapped = false
+  for (const key of VO_WRAPPERS) {
+    if (quoted[key]?.message) {
+      inner = quoted[key].message
+      wrapped = true
+      break
+    }
   }
 
-  // 1. saved copy from when it arrived (most reliable)
-  const saved = vo.get(id);
-  if (saved) return toContent(saved.type, saved.buf, saved.caption);
-
-  // 2. fallback: try the quoted copy
-  const found = vo.findViewOnce(ctx.ctxInfo?.quotedMessage);
-  if (found) {
-    try {
-      const buf = await vo.download(found.type, found.media);
-      return toContent(found.type, buf, found.media.caption);
-    } catch (e) {
-      console.log('[vo] quoted download failed:', e.message);
-    }
-  } else {
-    console.log('[vo] quoted message has no view once media');
+  for (const key of Object.keys(MEDIA_TYPES)) {
+    const media = inner[key]
+    if (!media) continue
+    // Newer clients set viewOnce: true on the media itself, no wrapper
+    if (wrapped || media.viewOnce) return { type: key, media }
   }
-
-  await ctx.reply('I did not catch that one. It must arrive while I am online.');
-  return null;
+  return null
 }
 
-module.exports = [
-  {
-    name: 'damn',
-    category: 'MEDIA',
-    menu: ['.damn (reply to view once)'],
-    run: async (ctx) => {
-      const content = await grab(ctx);
-      if (!content) return;
-      await ctx.sock.sendMessage(ctx.jid, content, { quoted: ctx.msg });
+async function toBuffer(media, kind) {
+  const stream = await downloadContentFromMessage(media, kind)
+  const chunks = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return Buffer.concat(chunks)
+}
+
+async function reveal(ctx, toDM) {
+  const { sock, jid, sender, isOwner, reply } = ctx
+  const msg = ctx.msg ?? ctx.m // the raw incoming message; adjust to whatever your ctx exposes
+
+  if (!isOwner) return // or reply('Owner only') if you want feedback
+
+  try {
+    const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    const found = extractViewOnce(quoted)
+    if (!found) return reply('Reply to a view-once message')
+
+    const { type, media } = found
+    const buffer = await toBuffer(media, MEDIA_TYPES[type])
+    const target = toDM ? sender : jid
+    const opts = toDM ? {} : { quoted: msg }
+    const caption = media.caption || undefined
+
+    if (type === 'imageMessage') {
+      await sock.sendMessage(target, { image: buffer, caption }, opts)
+    } else if (type === 'videoMessage') {
+      await sock.sendMessage(target, { video: buffer, caption }, opts)
+    } else {
+      await sock.sendMessage(
+        target,
+        { audio: buffer, mimetype: media.mimetype || 'audio/ogg; codecs=opus', ptt: !!media.ptt },
+        opts
+      )
     }
-  },
+  } catch (err) {
+    console.error('[vv]', err)
+    try { await reply('Failed to reveal that message') } catch {}
+  }
+}
+
+export default [
   {
     name: 'cute',
-    category: 'MEDIA',
-    menu: ['.cute (view once to your DM)'],
-    run: async (ctx) => {
-      const content = await grab(ctx);
-      if (!content) return;
-      await ctx.sock.sendMessage(ctx.sender, content);
-    }
+    aliases: ['cute'],
+    category: 'Media',
+    menu: 'Reveal a view-once message in chat',
+    run: (ctx) => reveal(ctx, false),
   },
   {
-    name: 'votest',
-    category: 'MEDIA',
-    menu: ['.votest (check view once system)'],
-    run: async (ctx) => {
-      await ctx.reply('View once system is loaded. Saved items: ' + vo.size());
-    }
-  }
-];
+    name: 'damn',
+    category: 'Media',
+    menu: 'Reveal a view-once message to your DM',
+    run: (ctx) => reveal(ctx, true),
+  },
+]
