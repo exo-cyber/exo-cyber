@@ -1,15 +1,15 @@
+
+
 'use strict';
 
 const { getPrefix } = require('./prefix');
 
-// essentials goes BEFORE sticker/music so its .sticker and .play
-// win over the old (faulty) ones with the same name
 const modules = [
   require('./general'),
   require('./ai'),
+  require('./music'),
   require('./essentials'),
   require('./sticker'),
-  require('./music'),
   require('./profile'),
   require('./fun'),
   require('./viewonce'),
@@ -20,24 +20,20 @@ const modules = [
   require('./tools')
 ];
 
-// ==========================================
-// COMBINE ALL COMMANDS (first one with a name wins, no duplicates)
-// ==========================================
-
+const commands = [];
 const seen = new Set();
 
-const commands = modules
-  .flat(Infinity)
-  .filter(Boolean)
-  .filter(cmd => {
-    if (!cmd.name || seen.has(cmd.name)) return false;
-    seen.add(cmd.name);
-    return true;
-  });
+for (const mod of modules.flat(Infinity)) {
+  if (!mod || !mod.name) continue;
 
-// ==========================================
-// COMMAND RUNNER
-// ==========================================
+  const names = [mod.name, ...(mod.aliases || [])]
+    .map(name => String(name).toLowerCase());
+
+  if (names.some(name => seen.has(name))) continue;
+
+  names.forEach(name => seen.add(name));
+  commands.push(mod);
+}
 
 async function run(ctx) {
   const prefix = getPrefix();
@@ -54,15 +50,19 @@ async function run(ctx) {
   const lower = name.toLowerCase();
 
   const command = commands.find(cmd =>
-    cmd.name === lower ||
-    cmd.aliases?.includes(lower)
+    cmd.name.toLowerCase() === lower ||
+    (cmd.aliases || []).some(
+      alias => alias.toLowerCase() === lower
+    )
   );
 
   if (!command) return false;
 
   await command.run({
     ...ctx,
+    prefix,
     args,
+    argText: args.join(' '),
     text: args.join(' '),
     command: lower
   });
