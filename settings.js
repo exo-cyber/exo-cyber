@@ -3,7 +3,7 @@
 const config = require('./config');
 const { createStore } = require('./jsonStore');
 
-const store = createStore('settings', { aiOff: {}, protectEnabled: null, claimed: [], protectAlias: [], subOwners: [], prefix: null, afk: {}, sleeping: {} });
+const store = createStore('settings', { aiOff: {}, protectEnabled: null, claimed: [], protectAlias: [], subOwners: [], prefix: null, afk: {}, sleeping: {}, antilink: {}, antilinkWarns: {} });
 
 function d() {
   const s = store.data;
@@ -13,6 +13,8 @@ function d() {
   s.subOwners = s.subOwners || [];
   s.sleeping = s.sleeping || {};
   s.afk = s.afk || {};
+  s.antilink = s.antilink || {};
+  s.antilinkWarns = s.antilinkWarns || {};
   if (s.protectEnabled === undefined) s.protectEnabled = null;
   if (s.prefix === undefined) s.prefix = null;
   return s;
@@ -67,6 +69,25 @@ const protectedIds = () => uniq([...config.protectedContact.ids, ...d().claimed,
 const isAsleep = (chatId) => Boolean(d().sleeping[chatId]);
 function setSleep(chatId, on) { if (on) d().sleeping[chatId] = true; else delete d().sleeping[chatId]; store.save(); }
 
+// --- Anti-link per group: { action: 'delete' | 'warn' | 'kick', scope: 'all' | 'gc' } or null (off)
+// scope 'all' = any link, 'gc' = only WhatsApp group invite links
+function antiLink(chatId) {
+  const v = d().antilink[chatId];
+  if (!v) return null;
+  if (typeof v === 'string') return { action: 'delete', scope: v === 'gc' ? 'gc' : 'all' }; // older saved format
+  return v;
+}
+function setAntiLink(chatId, cfg) { if (!cfg) delete d().antilink[chatId]; else d().antilink[chatId] = cfg; store.save(); }
+
+// Warning counts for anti-link (per group, per person)
+function addAntiLinkWarn(chatId, num) {
+  const w = d().antilinkWarns[chatId] || (d().antilinkWarns[chatId] = {});
+  w[num] = (w[num] || 0) + 1;
+  store.save();
+  return w[num];
+}
+function clearAntiLinkWarn(chatId, num) { if (d().antilinkWarns[chatId]) { delete d().antilinkWarns[chatId][num]; store.save(); } }
+
 // --- AFK
 const getAfk = (num) => d().afk[num] || null;
 function setAfk(num, info) { d().afk[num] = info; store.save(); }
@@ -75,6 +96,6 @@ function clearAfk(num) { delete d().afk[num]; store.save(); }
 module.exports = {
   isAiOn, setAi, isProtectOn, setProtect, prefix, setPrefix,
   claimed, isOwner, isMainOwner, isSubOwner, subOwners, addSubOwners, removeSubOwners, addClaimed, clearClaimed, addProtectAlias, protectedIds,
-  getAfk, setAfk, clearAfk, isAsleep, setSleep,
+  getAfk, setAfk, clearAfk, isAsleep, setSleep, antiLink, setAntiLink, addAntiLinkWarn, clearAntiLinkWarn,
   init: async () => { await store.load(); d(); },
 };

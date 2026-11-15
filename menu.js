@@ -15,7 +15,7 @@ function buildMenu(commands) {
   }
   const cats = [...ORDER.filter((c) => groups.has(c)), ...[...groups.keys()].filter((c) => !ORDER.includes(c))];
 
-  const lines = ['╭━━━「 L U M I 」', '┃', '┃ Status: Online', `┃ Personality: ${label()}`, '┃'];
+  const lines = ['╭━━━「 E X O - C Y B E R 」', '┃', '┃ Status: Online', `┃ Personality: ${label()}`, '┃'];
   for (const cat of cats) {
     lines.push(`┣━━━「 ${cat} 」`);
     for (const e of groups.get(cat)) lines.push(`┃ ◈ ${prefix}${e}`);

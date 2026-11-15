@@ -5,7 +5,33 @@ const settings = require('./settings');
 const memory = require('./memory');
 const { state } = require('./connection');
 
-const sendMenu = (ctx) => ctx.reply(buildMenu(ctx.commandList));
+const fs = require('fs');
+const path = require('path');
+
+// Menu picture/video: drop assets/menu.jpg (or .png/.webp/.mp4/.gif) into the bot,
+// or set MENU_MEDIA to a direct image/video URL. Falls back to plain text.
+function findMenuMedia() {
+  const url = process.env.MENU_MEDIA;
+  if (url) return { src: url, video: /\.(mp4|gif|mov|webm)(\?|$)/i.test(url) };
+  for (const ext of ['mp4', 'gif', 'mov', 'webm', 'jpg', 'jpeg', 'png', 'webp']) {
+    const file = path.join(__dirname, 'assets', `menu.${ext}`);
+    if (fs.existsSync(file)) return { src: file, video: ['mp4', 'gif', 'mov', 'webm'].includes(ext) };
+  }
+  return null;
+}
+
+async function sendMenu(ctx) {
+  const text = buildMenu(ctx.commandList);
+  const media = findMenuMedia();
+  if (!media) return ctx.reply(text);
+  try {
+    const content = media.src.startsWith('http') ? { url: media.src } : fs.readFileSync(media.src);
+    const msg = media.video ? { video: content, gifPlayback: true, caption: text } : { image: content, caption: text };
+    return await ctx.sock.sendMessage(ctx.jid, msg, { quoted: ctx.msg });
+  } catch (e) {
+    return ctx.reply(text);
+  }
+}
 
 function fmtUptime(sec) {
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);

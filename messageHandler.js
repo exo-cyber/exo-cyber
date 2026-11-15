@@ -14,6 +14,7 @@ const fallback = require('./fallback');
 const { systemPrompt, offlineReply, nameCallReply, cleanReply, isBoilerplate, isDistress, provocation, isHumanQuestion, identityReply, isVendorClaim } = require('./personality');
 const clapbacks = require('./clapbacks');
 const chatlog = require('./chatlog');
+const { enforceAntiLink } = require('./groupTools');
 const extras = require('./extras');
 
 // How much Exo-Cyber tolerates this person (see affinity.js). Added to her instructions.
@@ -150,6 +151,12 @@ async function handleMessage(sock, msg) {
     settings.setSleep(jid, true);
     await ctx.reply("Fine. I'm out. Wake me with 'exo wake up' when you need me.");
     return;
+  }
+
+  // Anti-link: act on links from non-admins in groups where it is switched on.
+  if (isGroup && !parsed && settings.antiLink(jid)) {
+    const acted = await enforceAntiLink(ctx, settings.antiLink(jid), settings).catch((e) => { log.warn('Anti-link failed:', e.message); return false; });
+    if (acted) return;
   }
 
   // FAST PATH: someone tagged MR NICK in a group (and it is not a command). Answer right away,

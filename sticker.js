@@ -23,7 +23,9 @@ async function liteSticker(buf) {
   const mask = Buffer.from(`<svg width="${S}" height="${S}"><rect width="${S}" height="${S}" rx="96" ry="96" fill="#fff"/></svg>`);
   for (const quality of [85, 65, 45, 30]) {
     const out = await sharp(buf)
+      .rotate()
       .resize(S, S, { fit: 'cover', position: sharp.strategy.attention })
+      .ensureAlpha()
       .composite([{ input: mask, blend: 'dest-in' }])
       .webp({ quality })
       .toBuffer();
@@ -55,9 +57,21 @@ async function makeSticker(ctx) {
     if ((media.node.seconds || 0) > MAX_SECONDS) return ctx.reply(`Videos must be ${MAX_SECONDS} seconds or less.`);
   }
 
-  const buf = await download(ctx.sock, media.source);
-  const out = media.kind === 'video' || Fancy ? await fancySticker(buf) : await liteSticker(buf);
-  if (!out) return ctx.reply("Couldn't squeeze that under WhatsApp's sticker size limit.");
+  let buf;
+  try { buf = await download(ctx.sock, media.source); }
+  catch (e) { return ctx.reply(`Couldn't download that media (${e.message}). Send it again.`); }
+
+  let out = null;
+  let lastErr = null;
+  if (media.kind === 'image') {
+    // Images: plain sharp first (no extra libraries needed), then the fancy maker as backup.
+    try { out = await liteSticker(buf); } catch (e) { lastErr = e; }
+    if (!out && Fancy) { try { out = await fancySticker(buf); } catch (e) { lastErr = e; } }
+  } else {
+    try { out = await fancySticker(buf); } catch (e) { lastErr = e; }
+  }
+  if (lastErr) require('./logger').error('Sticker failed:', lastErr.message);
+  if (!out) return ctx.reply(lastErr ? `Sticker failed: ${lastErr.message}` : "Couldn't squeeze that under WhatsApp's sticker size limit.");
   return ctx.sock.sendMessage(ctx.jid, { sticker: out }, { quoted: ctx.msg });
 }
 

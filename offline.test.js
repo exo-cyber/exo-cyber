@@ -29,7 +29,9 @@ const sock = {
   sendMessage: async (jid, content) => { sent.push({ jid, ...content }); return { key: { id: `out${sent.length}` } }; },
   sendPresenceUpdate: async () => {},
   groupMetadata: async () => ({ participants: [{ id: '2348111111111@s.whatsapp.net', admin: 'admin' }, { id: '15550001111@s.whatsapp.net', admin: 'admin' }] }),
-  groupParticipantsUpdate: async (_j, targets) => targets.map((t) => ({ status: '200', jid: t })),
+  groupParticipantsUpdate: async (_j, targets, action) => { sock.lastAction = action; return targets.map((t) => ({ status: '200', jid: t })); },
+  groupSettingUpdate: async (_j, setting) => { sock.lastSetting = setting; },
+  groupInviteCode: async () => 'ABC123',
 };
 let n = 0;
 const mk = ({ from, group, text, mentions = [], reply, name = 'Tester' }) => ({
@@ -180,6 +182,58 @@ const texts = () => sent.map((s) => s.text).filter(Boolean);
     sent.length = 0;
     await handleMessage(sock, mk({ from: admin, group: G, text: '.kick @x', mentions: ['2349555555555@s.whatsapp.net'] }));
     assert.strictEqual(last().text, 'Gone.');
+  });
+
+  await test('group: promote, demote, mute, unmute, link, antilink', async () => {
+    const admin = '2348111111111';
+    const run = async (from, text, mentions = []) => { sent.length = 0; await handleMessage(sock, mk({ from, group: G, text, mentions })); };
+    await run('2349000000001', '.mute');
+    assert.strictEqual(last().text, 'Admins only.');
+    await run(admin, '.promote @x', ['2349555555555@s.whatsapp.net']);
+    assert.strictEqual(sock.lastAction, 'promote');
+    assert.ok(/Promoted/.test(last().text));
+    await run(admin, '.demote @x', ['2349555555555@s.whatsapp.net']);
+    assert.strictEqual(sock.lastAction, 'demote');
+    await run(admin, '.demote @owner', [`${OWNER}@s.whatsapp.net`]);
+    assert.ok(/Not him/.test(last().text));
+    await run(admin, '.promote');
+    assert.ok(/Tag who/.test(last().text));
+    await run(admin, '.mute');
+    assert.strictEqual(sock.lastSetting, 'announcement');
+    await run(admin, '.unmute');
+    assert.strictEqual(sock.lastSetting, 'not_announcement');
+    await run(admin, '.link');
+    assert.strictEqual(last().text, 'https://chat.whatsapp.com/ABC123');
+    // anti-link modes
+    const stranger = '2349000000001';
+    const link = 'check this https://example.com/x';
+    await run(admin, '.antilink delete');
+    assert.ok(/Anti-link on/.test(last().text));
+    await run(stranger, link);
+    assert.ok(sent.some((x) => x.delete), 'delete mode: link not deleted');
+    assert.ok(!sent.some((x) => x.text), 'delete mode should be silent');
+    await run(admin, 'my site https://example.com/x');
+    assert.ok(!sent.some((x) => x.delete), 'admin link was deleted');
+    await run(admin, '.antilink warn');
+    await run(stranger, link);
+    assert.ok(/Warning 1\/3/.test(sent.find((x) => x.text).text), 'warn 1');
+    await run(stranger, link);
+    assert.ok(/Warning 2\/3/.test(sent.find((x) => x.text).text), 'warn 2');
+    sock.lastAction = null;
+    await run(stranger, link);
+    assert.strictEqual(sock.lastAction, 'remove', 'third warning should remove');
+    await run(admin, '.antilink kick');
+    sock.lastAction = null;
+    await run(stranger, link);
+    assert.ok(sent.some((x) => x.delete) && sock.lastAction === 'remove', 'kick mode: delete + remove');
+    await run(admin, '.antilink delete gc');
+    await run(stranger, link);
+    assert.ok(!sent.some((x) => x.delete), 'gc scope should ignore normal links');
+    await run(stranger, 'join https://chat.whatsapp.com/AbCdEf');
+    assert.ok(sent.some((x) => x.delete), 'gc scope should catch group invite links');
+    await run(admin, '.antilink off');
+    await run(stranger, link);
+    assert.ok(!sent.some((x) => x.delete), 'link deleted while off');
   });
 
   await test('saying just "Exo-Cyber" gets a quick answer; chatbot off silences chat', async () => {
@@ -483,7 +537,7 @@ const texts = () => sent.map((s) => s.text).filter(Boolean);
     assert.ok(/Online/.test(last().text));
     sent.length = 0;
     await handleMessage(sock, mk({ from: OWNER, text: 'menu' }));
-    assert.ok(/L U M I/.test(last().text));
+    assert.ok(/E X O - C Y B E R/.test(last().text));
     sent.length = 0;
     await handleMessage(sock, mk({ from: OWNER, text: 'afk lunch' }));
     assert.ok(settings.getAfk(OWNER));
@@ -495,7 +549,7 @@ const texts = () => sent.map((s) => s.text).filter(Boolean);
     settings.addSubOwners(['2349420000001', '2349420000002', '2349420000003']);
     sent.length = 0;
     await handleMessage(sock, mk({ from: '2349420000001', text: 'help me with my homework' }));   // owner, normal chat
-    assert.ok(sent.length >= 1 && !/L U M I/.test(last().text), 'turned chat into .help');
+    assert.ok(sent.length >= 1 && !/E X O - C Y B E R/.test(last().text), 'turned chat into .help');
     await handleMessage(sock, mk({ from: '2349420000002', text: 'sleep' }));
     assert.ok(!settings.isAsleep('2349420000002@s.whatsapp.net'), 'bare "sleep" must not put her to sleep');
     sent.length = 0;
