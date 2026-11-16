@@ -1,4 +1,3 @@
-```js
 // Decides what to do with each incoming message:
 // learn ids -> MR NICK protection (fast) -> AFK -> commands -> AI chat (if Exo-Cyber is addressed)
 const config = require('./config');
@@ -18,6 +17,7 @@ const chatlog = require('./chatlog');
 const { enforceAntiLink } = require('./groupTools');
 const extras = require('./extras');
 const friends = require('./friends'); // if friends.js lives in plugins/, use './plugins/friends'
+const human = require('./human');     // voice notes, stickers and people memory
 
 // Current bot mode ('public' or 'private'). Read fresh on every message so .mode takes effect at once.
 function currentMode() {
@@ -201,6 +201,9 @@ async function handleMessage(sock, msg) {
   // 3) AI conversation
   if (blocked || !text || !settings.isAiOn(jid) || !isAddressed(ctx, botNumbers(sock))) return;
 
+  // She is being talked to: remember this person (name, small facts).
+  human.learn(ctx);
+
   // Just her name ("Exo-Cyber") -> a quick answer with no AI call.
   if (/^@?\s*exo(?:[\s-]?cyber)?[\s!?.,]*$/i.test(text)) { await ctx.reply(nameCallReply(ctx.isOwner)); return; }
 
@@ -228,11 +231,12 @@ async function handleMessage(sock, msg) {
   const provoked = provocation(text);
   if (provoked && !ctx.isOwner) { await ctx.reply(clapbacks.pick(provoked)); return; }
 
-  sock.sendPresenceUpdate('composing', jid).catch(() => {}); // not awaited: don't delay the AI call
+  const asVoice = human.wantsVoice(ctx); // sometimes she answers with a voice note
+  sock.sendPresenceUpdate(asVoice ? 'recording' : 'composing', jid).catch(() => {}); // not awaited: don't delay the AI call
   // Drop any old answers that wrongly named a company as her maker.
   const history = memory.get(senderNum).filter((h) => !(h.role === 'assistant' && isVendorClaim(h.content)));
   const messages = [
-    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName, isOwner: ctx.isOwner, provocation: provoked }) + bondNote(senderNum, ctx.isOwner, ctx.isFriend) },
+    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName, isOwner: ctx.isOwner, provocation: provoked }) + bondNote(senderNum, ctx.isOwner, ctx.isFriend) + human.personNote(ctx) + human.promptNote(asVoice) },
     ...history,
     { role: 'user', content: text },
   ];
@@ -250,8 +254,7 @@ async function handleMessage(sock, msg) {
   memory.add(senderNum, 'user', text);
   memory.add(senderNum, 'assistant', answer);
   extras.gainAffinity(senderNum); // +1 affinity per conversation (max once per 30 s per person)
-  await ctx.reply(answer);
+  await human.respond(ctx, answer, asVoice); // voice note or text, and now and then a sticker
 }
 
 module.exports = { handleMessage };
-```
