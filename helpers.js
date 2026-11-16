@@ -50,7 +50,19 @@ function findMedia(msg, kinds) {
   return null;
 }
 
-const download = (sock, source) =>
-  downloadMediaMessage(source, 'buffer', {}, { logger: pino, reuploadRequest: sock.updateMediaMessage });
+const download = async (sock, source) => {
+  return await downloadMediaMessage(
+    {
+      key: source.key,
+      message: source.message
+    },
+    'buffer',
+    {},
+    {
+      logger: pino,
+      reuploadRequest: sock.updateMediaMessage.bind(sock)
+    }
+  );
+};
 
 module.exports = { unwrap, getText, getContext, findMedia, download };
