@@ -1,4 +1,3 @@
-```js
 // Switches and small facts that survive restarts:
 // AI on/off per chat, MR NICK protection, claimed owner ids, prefix, AFK list, public/private mode.
 const config = require('./config');
@@ -112,4 +111,3 @@ module.exports = {
   getAfk, setAfk, clearAfk, isAsleep, setSleep, antiLink, setAntiLink, addAntiLinkWarn, clearAntiLinkWarn,
   init: async () => { await store.load(); d(); },
 };
-```
