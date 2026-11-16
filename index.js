@@ -7,8 +7,10 @@ const { findMedia } = require('./helpers');
 
 const modules = [
   require('./general'), require('./ai'), require('./sticker'), require('./music'), require('./profile'),
-  require('./group'), require('./afk'), require('./owner'), require('./friends'), require('./human'),
-  require('./download'),require('./interaction') , require('./convert'), require('./hidetag'), require('./recap'), require('./affinity'), require('./games'),
+  require('./group'), require('./afk'), require('./owner'), require('./friends'),
+  require('./download'),require('./human'),
+  require('./interaction') , require('./convert'), require('./hidetag'), require('./recap'), require('./affinity'), require('./games'),
+
 ];
 
 const list = [];
