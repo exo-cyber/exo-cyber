@@ -1,3 +1,4 @@
+```js
 // Decides what to do with each incoming message:
 // learn ids -> MR NICK protection (fast) -> AFK -> commands -> AI chat (if Exo-Cyber is addressed)
 const config = require('./config');
@@ -16,10 +17,22 @@ const clapbacks = require('./clapbacks');
 const chatlog = require('./chatlog');
 const { enforceAntiLink } = require('./groupTools');
 const extras = require('./extras');
+const friends = require('./friends'); // if friends.js lives in plugins/, use './plugins/friends'
+
+// Current bot mode ('public' or 'private'). Read fresh on every message so .mode takes effect at once.
+function currentMode() {
+  try {
+    const raw = typeof settings.getMode === 'function' ? settings.getMode() : settings.mode;
+    return String(raw || 'public').toLowerCase();
+  } catch {
+    return 'public';
+  }
+}
 
 // How much Exo-Cyber tolerates this person (see affinity.js). Added to her instructions.
-function bondNote(num, isOwner) {
+function bondNote(num, isOwner, isFriend) {
   if (isOwner) return '';
+  if (isFriend) return '\n- This person is on your friends list. You are warm, playful and loyal with them. Still you, just friendlier.';
   const { level } = extras.getAffinity(num);
   if (level === 'stranger' || level === 'tolerated') return `\n- Your bond with this person: ${level}. Do not warm up to them.`;
   return `\n- Your bond with this person: ${level}. You are a little less sharp with them than with strangers, but still you.`;
@@ -123,15 +136,21 @@ async function handleMessage(sock, msg) {
   const sender = msg.key.participant || jid;
   const senderNum = numberOf(sender);
   const ctxInfo = getContext(m);
+  const isOwner = settings.isOwner(senderNum);
   const ctx = {
     sock, msg, m, jid, sender, senderNum, text, isGroup, ctxInfo, receivedAt,
     pushName: msg.pushName || '',
     mentioned: ctxInfo?.mentionedJid || [],
-    isOwner: settings.isOwner(senderNum),
+    isOwner,
     isMainOwner: settings.isMainOwner(senderNum),
+    isFriend: isOwner || friends.isFriend(senderNum),
     isBotMessage: (id, participant) => sentIds.has(id) || Boolean(participant && botNumbers(sock).includes(numberOf(participant))),
     reply: (t, extra = {}) => sock.sendMessage(jid, { text: t, ...extra }, { quoted: msg }),
   };
+
+  // PRIVATE MODE: only owners and friends get commands and AI answers. Everyone else is ignored
+  // (MR NICK protection, anti-link and AFK still run).
+  const blocked = currentMode() === 'private' && !ctx.isFriend;
 
   ctx.addressed = isAddressed(ctx, botNumbers(sock));
   const parsed = commands.parse(text, ctx);
@@ -153,8 +172,8 @@ async function handleMessage(sock, msg) {
     return;
   }
 
-  // Anti-link: act on links from non-admins in groups where it is switched on.
-  if (isGroup && !parsed && settings.antiLink(jid)) {
+  // Anti-link: act on links from non-admins in groups where it is switched on (friends are exempt).
+  if (isGroup && !parsed && !ctx.isFriend && settings.antiLink(jid)) {
     const acted = await enforceAntiLink(ctx, settings.antiLink(jid), settings).catch((e) => { log.warn('Anti-link failed:', e.message); return false; });
     if (acted) return;
   }
@@ -175,18 +194,18 @@ async function handleMessage(sock, msg) {
   // 0) AFK bookkeeping (never blocks the rest)
   await afkHandling(ctx, isAfkCommand).catch((e) => log.warn('AFK handling failed:', e.message));
 
-  // 1) Commands
-  if (parsed && (await commands.run(ctx))) return;
+  // 1) Commands (skipped in private mode for people who are not owners/friends)
+  if (parsed && !blocked && (await commands.run(ctx))) return;
   if (parsed && (await protectNow())) return; // a command that did not run but tagged MR NICK
 
   // 3) AI conversation
-  if (!text || !settings.isAiOn(jid) || !isAddressed(ctx, botNumbers(sock))) return;
+  if (blocked || !text || !settings.isAiOn(jid) || !isAddressed(ctx, botNumbers(sock))) return;
 
   // Just her name ("Exo-Cyber") -> a quick answer with no AI call.
   if (/^@?\s*exo(?:[\s-]?cyber)?[\s!?.,]*$/i.test(text)) { await ctx.reply(nameCallReply(ctx.isOwner)); return; }
 
-  // Owners are never rate-limited.
-  if (!ctx.isOwner) {
+  // Owners and friends are never rate-limited.
+  if (!ctx.isFriend) {
     const last = lastAiAt.get(senderNum) || 0;
     if (Date.now() - last < config.ai.userCooldownMs) return;
     lastAiAt.set(senderNum, Date.now());
@@ -213,7 +232,7 @@ async function handleMessage(sock, msg) {
   // Drop any old answers that wrongly named a company as her maker.
   const history = memory.get(senderNum).filter((h) => !(h.role === 'assistant' && isVendorClaim(h.content)));
   const messages = [
-    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName, isOwner: ctx.isOwner, provocation: provoked }) + bondNote(senderNum, ctx.isOwner) },
+    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName, isOwner: ctx.isOwner, provocation: provoked }) + bondNote(senderNum, ctx.isOwner, ctx.isFriend) },
     ...history,
     { role: 'user', content: text },
   ];
@@ -235,3 +254,4 @@ async function handleMessage(sock, msg) {
 }
 
 module.exports = { handleMessage };
+```
