@@ -1,4 +1,4 @@
-// Owner tools: claim, unclaim, setprefix, setprofilepic
+// Owner tools: claim, unclaim, setprefix, setprofilepic, mode, sudo
 const crypto = require('crypto');
 const config = require('./config');
 const settings = require('./settings');
@@ -41,6 +41,22 @@ function parseDuration(a) {
   const unit = (m[2] || 's').toLowerCase();
   const ms = parseInt(m[1], 10) * (unit.startsWith('h') ? 3600000 : unit.startsWith('m') ? 60000 : 1000);
   return ms >= 1000 && ms <= 6 * 3600000 ? ms : null;
+}
+
+// Shared by .addsubowner and .sudo
+function grantSudo(ctx) {
+  const t = targetNumbers(ctx);
+  if (!t.length) return ctx.reply(`Tag them, reply to their message, or type their number.\nExample: ${settings.prefix()}sudo @user`);
+  if (t.every((n) => settings.isMainOwner(n))) return ctx.reply("That one's already the owner.");
+  const added = settings.addSubOwners(t);
+  return ctx.reply(added ? "Done. They can use owner commands now. Don't make me regret it." : 'They already have that.');
+}
+
+function revokeSudo(ctx) {
+  const t = targetNumbers(ctx);
+  if (!t.length) return ctx.reply(`Tag them, reply to their message, or type their number.\nExample: ${settings.prefix()}delsudo @user`);
+  const removed = settings.removeSubOwners(t);
+  return ctx.reply(removed ? 'Removed. Back to normal person.' : "They weren't a sub-owner.");
 }
 
 module.exports = [
@@ -91,21 +107,39 @@ module.exports = [
   },
   {
     name: 'addsubowner', category: 'OWNER', menu: ['addsubowner @user'], mainOwnerOnly: true,
-    run: (ctx) => {
-      const t = targetNumbers(ctx);
-      if (!t.length) return ctx.reply(`Tag them, reply to their message, or type their number.\nExample: ${settings.prefix()}addsubowner @user`);
-      if (t.every((n) => settings.isMainOwner(n))) return ctx.reply("That one's already the owner.");
-      const added = settings.addSubOwners(t);
-      return ctx.reply(added ? "Done. They can use owner commands now. Don't make me regret it." : 'They already have that.');
-    },
+    run: grantSudo,
   },
   {
     name: 'delsubowner', category: 'OWNER', menu: ['delsubowner @user'], mainOwnerOnly: true,
+    run: revokeSudo,
+  },
+  {
+    // .sudo @user  -> same as .addsubowner
+    name: 'sudo', category: 'OWNER', menu: ['sudo @user'], mainOwnerOnly: true,
+    run: grantSudo,
+  },
+  {
+    name: 'delsudo', category: 'OWNER', menu: ['delsudo @user'], mainOwnerOnly: true,
+    run: revokeSudo,
+  },
+  {
+    name: 'listsudo', category: 'OWNER', menu: ['listsudo'], ownerOnly: true,
     run: (ctx) => {
-      const t = targetNumbers(ctx);
-      if (!t.length) return ctx.reply(`Tag them, reply to their message, or type their number.\nExample: ${settings.prefix()}delsubowner @user`);
-      const removed = settings.removeSubOwners(t);
-      return ctx.reply(removed ? 'Removed. Back to normal person.' : "They weren't a sub-owner.");
+      const list = settings.subOwners();
+      if (!list.length) return ctx.reply('No sudo users.');
+      return ctx.reply(`*Sudo users (${list.length})*\n` + list.map((n, i) => `${i + 1}. ${n}`).join('\n'));
+    },
+  },
+  {
+    // .mode public / .mode private  (private = owners and friends only)
+    name: 'mode', category: 'OWNER', menu: ['mode <public|private>'], ownerOnly: true,
+    run: (ctx) => {
+      const arg = (ctx.args[0] || '').toLowerCase();
+      if (!arg) return ctx.reply(`Current mode: ${settings.getMode()}\nUse: ${settings.prefix()}mode public or ${settings.prefix()}mode private`);
+      if (!settings.setMode(arg)) return ctx.reply(`Use ${settings.prefix()}mode public or ${settings.prefix()}mode private`);
+      return ctx.reply(arg === 'private'
+        ? 'Private mode on. Only owners and friends get me.'
+        : 'Public mode on. Everyone gets me. Brace yourself.');
     },
   },
   {
