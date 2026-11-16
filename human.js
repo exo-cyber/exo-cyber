@@ -404,6 +404,7 @@ const commands = [
   },
 ];
 
+
 // ---------------- EXPORTS ----------------
 
 for (const [k, v] of Object.entries({
@@ -419,9 +420,4 @@ for (const [k, v] of Object.entries({
   });
 }
 
-module.exports = commands;
-es them for commands.
-for (const [k, v] of Object.entries({ learn, personNote, wantsVoice, promptNote, respond })) {
-  Object.defineProperty(commands, k, { value: v, enumerable: false });
-}
 module.exports = commands;
