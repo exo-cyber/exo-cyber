@@ -1,9 +1,10 @@
+```js
 // Switches and small facts that survive restarts:
-// AI on/off per chat, MR NICK protection, claimed owner ids, prefix, AFK list.
+// AI on/off per chat, MR NICK protection, claimed owner ids, prefix, AFK list, public/private mode.
 const config = require('./config');
 const { createStore } = require('./jsonStore');
 
-const store = createStore('settings', { aiOff: {}, protectEnabled: null, claimed: [], protectAlias: [], subOwners: [], prefix: null, afk: {}, sleeping: {}, antilink: {}, antilinkWarns: {} });
+const store = createStore('settings', { aiOff: {}, protectEnabled: null, claimed: [], protectAlias: [], subOwners: [], prefix: null, afk: {}, sleeping: {}, antilink: {}, antilinkWarns: {}, mode: 'public' });
 
 function d() {
   const s = store.data;
@@ -17,9 +18,20 @@ function d() {
   s.antilinkWarns = s.antilinkWarns || {};
   if (s.protectEnabled === undefined) s.protectEnabled = null;
   if (s.prefix === undefined) s.prefix = null;
+  if (s.mode !== 'public' && s.mode !== 'private') s.mode = 'public';
   return s;
 }
 const uniq = (a) => [...new Set(a)];
+
+// --- Bot mode: 'public' = everyone can use the bot, 'private' = owners and friends only
+const getMode = () => d().mode;
+function setMode(m) {
+  const mode = String(m || '').toLowerCase();
+  if (mode !== 'public' && mode !== 'private') return false;
+  d().mode = mode;
+  store.save();
+  return true;
+}
 
 // --- AI on/off per chat
 const isAiOn = (chatId) => !d().aiOff[chatId];
@@ -94,8 +106,10 @@ function setAfk(num, info) { d().afk[num] = info; store.save(); }
 function clearAfk(num) { delete d().afk[num]; store.save(); }
 
 module.exports = {
+  getMode, setMode,
   isAiOn, setAi, isProtectOn, setProtect, prefix, setPrefix,
   claimed, isOwner, isMainOwner, isSubOwner, subOwners, addSubOwners, removeSubOwners, addClaimed, clearClaimed, addProtectAlias, protectedIds,
   getAfk, setAfk, clearAfk, isAsleep, setSleep, antiLink, setAntiLink, addAntiLinkWarn, clearAntiLinkWarn,
   init: async () => { await store.load(); d(); },
 };
+```
