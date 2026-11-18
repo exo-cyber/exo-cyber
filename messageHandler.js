@@ -18,7 +18,7 @@ const { enforceAntiLink } = require('./groupTools');
 const extras = require('./extras');
 const friends = require('./friends'); // if friends.js lives in plugins/, use './plugins/friends'
 const human = require('./human');     // voice notes, stickers and people memory
-const autoclaim = require('./autoclaim'); // NEW (or './plugins/autoclaim')
+const autoclaim = require('./autoclaim'); // or './plugins/autoclaim'
 
 // Current bot mode ('public' or 'private'). Read fresh on every message so .mode takes effect at once.
 function currentMode() {
@@ -173,7 +173,7 @@ async function handleMessage(sock, msg) {
     return;
   }
 
-  // NEW: Auto-claim card drops (fire and forget, never delays anything else)
+  // Auto-claim card drops (fire and forget, never delays anything else)
   autoclaim.autoClaim(sock, msg, m, text).catch((e) => log.warn('Autoclaim failed:', e.message));
 
   // Anti-link: act on links from non-admins in groups where it is switched on (friends are exempt).
@@ -215,53 +215,6 @@ async function handleMessage(sock, msg) {
   if (!ctx.isFriend) {
     const last = lastAiAt.get(senderNum) || 0;
     if (Date.now() - last < config.ai.userCooldownMs) return;
-    lastAiAt.set(senderNum, Date.now());
-  }
-
-  // "Who built you?" and "what model are you?" are answered directly: never by the AI.
-  const who = identityReply(text, ctx.isOwner);
-  if (who) {
-    memory.add(senderNum, 'user', text);
-    memory.add(senderNum, 'assistant', who);
-    await ctx.reply(who);
-    return;
-  }
-
-  // Sincerely asked if she's human: honest, in her own voice.
-  if (isHumanQuestion(text)) { await ctx.reply(clapbacks.pick(ctx.isOwner ? 'notHumanOwner' : 'notHuman')); return; }
-
-  // Provoked (insult, slur, pet name, "you're a bot"): she always hits back. No AI needed.
-  // For her owner it goes to the AI instead, with a "tease, don't go cold" note.
-  const provoked = provocation(text);
-  if (provoked && !ctx.isOwner) { await ctx.reply(clapbacks.pick(provoked)); return; }
-
-  const asVoice = human.wantsVoice(ctx); // sometimes she answers with a voice note
-  sock.sendPresenceUpdate(asVoice ? 'recording' : 'composing', jid).catch(() => {}); // not awaited: don't delay the AI call
-  // Drop any old answers that wrongly named a company as her maker.
-  const history = memory.get(senderNum).filter((h) => !(h.role === 'assistant' && isVendorClaim(h.content)));
-  const messages = [
-    { role: 'system', content: systemPrompt({ isGroup, name: ctx.pushName, isOwner: ctx.isOwner, provocation: provoked }) + bondNote(senderNum, ctx.isOwner, ctx.isFriend) + human.personNote(ctx) + human.promptNote(asVoice) },
-    ...history,
-    { role: 'user', content: text },
-  ];
-  const result = await fallback.generate(messages);
-  sock.sendPresenceUpdate('paused', jid).catch(() => {});
-
-  if (!result) {
-    log.warn('All AI providers failed for a message.');
-    await ctx.reply(offlineReply());
-    return;
-  }
-  let answer = cleanReply(result.text);
-  // Assistant-style safety boilerplate is replaced by a rude one-liner, unless the person seems to be in real distress.
-  if (isBoilerplate(answer) && !isDistress(text)) answer = clapbacks.pick(ctx.isOwner ? 'deflectOwner' : 'deflect');
-  memory.add(senderNum, 'user', text);
-  memory.add(senderNum, 'assistant', answer);
-  extras.gainAffinity(senderNum); // +1 affinity per conversation (max once per 30 s per person)
-  await human.respond(ctx, answer, asVoice); // voice note or text, and now and then a sticker
-}
-
-module.exports = { handleMessage };ldownMs) return;
     lastAiAt.set(senderNum, Date.now());
   }
 
